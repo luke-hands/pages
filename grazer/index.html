@@ -75,6 +75,45 @@
             font-size: 1.2rem;
             opacity: 0.8;
         }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+            text-align: center;
+            z-index: 100;
+        }
+        #start-screen h1 {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            color: var(--accent);
+            letter-spacing: 0.2em;
+        }
+        .instructions {
+            margin-bottom: 2rem;
+        }
+        .instruction-line {
+            font-size: 1.1rem;
+            margin: 0.5rem 0;
+            opacity: 0.7;
+            letter-spacing: 0.1em;
+        }
+        .cta {
+            font-size: 1.4rem;
+            color: var(--fg);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -88,6 +127,15 @@
         <h1>SHATTERED</h1>
         <p>TAP OR SPACE TO RESTART</p>
     </div>
+    <div id="start-screen">
+        <h1>GRAZER</h1>
+        <div class="instructions">
+            <div class="instruction-line">DRAG ANYWHERE TO MOVE</div>
+            <div class="instruction-line">GRAZE BULLETS FOR COMBO</div>
+            <div class="instruction-line">HITBOX IS THE WHITE DOT</div>
+        </div>
+        <div class="cta">TAP TO START</div>
+    </div>
 
     <script>
         const canvas = document.getElementById('game');
@@ -95,8 +143,10 @@
         const scoreEl = document.getElementById('score');
         const bestEl = document.getElementById('best');
         const gameOverEl = document.getElementById('game-over');
+        const startScreenEl = document.getElementById('start-screen');
 
         let width, height, dpr, u;
+        let gameStarted = false;
         let lastTime = 0;
         let paused = false;
 
@@ -112,6 +162,8 @@
         };
 
         const mouse = { x: 0, y: 0 };
+        const touchOrigin = { x: 0, y: 0 };
+        const shipOrigin = { x: 0, y: 0 };
         let isTouch = false;
 
         const bullets = [];
@@ -140,6 +192,7 @@
         const sparkPool = [];
         const shatterPool = [];
         let screenShake = 0;
+        let vignetteIntensity = 0;
 
         function getSpark() {
             return sparkPool.pop() || { x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 0, color: '#ffd700' };
@@ -373,15 +426,36 @@
             isTouch = e.pointerType === 'touch';
             mouse.x = e.clientX;
             mouse.y = e.clientY;
-            ship.tx = mouse.x;
-            ship.ty = mouse.y;
+
             if (isTouch) {
-                ship.ty -= 12 * u;
+                const dx = mouse.x - touchOrigin.x;
+                const dy = mouse.y - touchOrigin.y;
+                ship.tx = shipOrigin.x + dx;
+                ship.ty = shipOrigin.y + dy;
+            } else {
+                ship.tx = mouse.x;
+                ship.ty = mouse.y;
             }
+
+            // Clamp
+            ship.tx = Math.max(0, Math.min(width, ship.tx));
+            ship.ty = Math.max(0, Math.min(height, ship.ty));
         });
 
         window.addEventListener('pointerdown', e => {
             initAudio();
+            if (!gameStarted) {
+                gameStarted = true;
+                startScreenEl.style.display = 'none';
+                lastTime = performance.now();
+            }
+            isTouch = e.pointerType === 'touch';
+            if (isTouch) {
+                touchOrigin.x = e.clientX;
+                touchOrigin.y = e.clientY;
+                shipOrigin.x = ship.tx;
+                shipOrigin.y = ship.ty;
+            }
             if (ship.dead) restart();
         });
 
@@ -423,6 +497,7 @@
         }
 
         function update(dt) {
+            if (!gameStarted) return;
             if (hitStopTimer > 0) {
                 hitStopTimer -= dt;
                 return;
@@ -539,6 +614,15 @@
             }
 
             ship.haloRadius = 5.5 * u;
+
+            // Vignette intensity based on nearest bullet
+            let minDist = Infinity;
+            for (const b of bullets) {
+                const dist = Math.hypot(b.x - ship.x, b.y - ship.y);
+                if (dist < minDist) minDist = dist;
+            }
+            const targetVignette = Math.max(0, 1 - (minDist / (25 * u)));
+            vignetteIntensity += (targetVignette - vignetteIntensity) * (1 - Math.exp(-15 * dt));
         }
 
         function die() {
@@ -586,7 +670,18 @@
             }
 
             drawContent();
+            drawVignette();
             ctx.restore();
+        }
+
+        function drawVignette() {
+            if (vignetteIntensity <= 0.01) return;
+            const grad = ctx.createRadialGradient(ship.x, ship.y, 0, ship.x, ship.y, Math.max(width, height));
+            grad.addColorStop(0, `rgba(7, 8, 15, 0)`);
+            grad.addColorStop(0.3, `rgba(7, 8, 15, ${vignetteIntensity * 0.3})`);
+            grad.addColorStop(1, `rgba(7, 8, 15, ${vignetteIntensity * 0.9})`);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, width, height);
         }
 
         function drawContent(ghost = false, ghostColor = null) {

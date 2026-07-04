@@ -98,6 +98,67 @@
         @media (max-width: 768px) {
             #controls-hint { display: none; }
         }
+
+        #mobile-controls {
+            position: absolute;
+            bottom: 30px;
+            left: 0;
+            width: 100%;
+            display: none;
+            justify-content: space-between;
+            padding: 0 30px;
+            box-sizing: border-box;
+            pointer-events: none;
+            user-select: none;
+            z-index: 10;
+        }
+
+        @media (pointer: coarse) {
+            #mobile-controls {
+                display: flex;
+            }
+        }
+
+        .control-group {
+            display: flex;
+            gap: 15px;
+            pointer-events: auto;
+            align-items: flex-end;
+        }
+
+        .mobile-btn {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: rgba(124, 108, 255, 0.1) !important;
+            border: 2px solid var(--accent) !important;
+            color: var(--fg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9rem;
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+            padding: 0 !important;
+            transition: opacity 0.1s;
+        }
+
+        .mobile-btn:active {
+            opacity: 0.6;
+        }
+
+        #fire-btn {
+            border-color: #ff6ec7 !important;
+            background: rgba(255, 110, 199, 0.1) !important;
+            width: 85px;
+            height: 85px;
+        }
+
+        #thrust-btn {
+            width: 85px;
+            height: 85px;
+        }
     </style>
 </head>
 <body>
@@ -112,6 +173,17 @@
     </div>
 
     <div id="controls-hint">Arrows to move/thrust • Space to fire</div>
+
+    <div id="mobile-controls">
+        <div class="control-group">
+            <button id="left-btn" class="mobile-btn">L</button>
+            <button id="right-btn" class="mobile-btn">R</button>
+        </div>
+        <div class="control-group">
+            <button id="thrust-btn" class="mobile-btn">THRUST</button>
+            <button id="fire-btn" class="mobile-btn">FIRE</button>
+        </div>
+    </div>
 
     <canvas id="gameCanvas"></canvas>
 
@@ -222,21 +294,31 @@
         window.addEventListener('keydown', e => keys[e.code] = true);
         window.addEventListener('keyup', e => keys[e.code] = false);
 
-        // Touch handling (simplified for mobile)
-        canvas.addEventListener('touchstart', e => {
-            keys['Space'] = true;
-            const touch = e.touches[0];
-            if (touch.clientX < width / 3) keys['ArrowLeft'] = true;
-            else if (touch.clientX > 2 * width / 3) keys['ArrowRight'] = true;
-            else keys['ArrowUp'] = true;
-        }, {passive: false});
+        // Touch handling
+        function bindControl(btnId, keyCode) {
+            const btn = document.getElementById(btnId);
+            const handleStart = (e) => {
+                e.preventDefault();
+                keys[keyCode] = true;
+            };
+            const handleEnd = (e) => {
+                e.preventDefault();
+                keys[keyCode] = false;
+            };
+            btn.addEventListener('touchstart', handleStart, { passive: false });
+            btn.addEventListener('touchend', handleEnd, { passive: false });
+            btn.addEventListener('touchcancel', handleEnd, { passive: false });
 
-        canvas.addEventListener('touchend', e => {
-            keys['Space'] = false;
-            keys['ArrowLeft'] = false;
-            keys['ArrowRight'] = false;
-            keys['ArrowUp'] = false;
-        });
+            // Mouse support for testing on desktop
+            btn.addEventListener('mousedown', () => keys[keyCode] = true);
+            btn.addEventListener('mouseup', () => keys[keyCode] = false);
+            btn.addEventListener('mouseleave', () => keys[keyCode] = false);
+        }
+
+        bindControl('left-btn', 'ArrowLeft');
+        bindControl('right-btn', 'ArrowRight');
+        bindControl('thrust-btn', 'ArrowUp');
+        bindControl('fire-btn', 'Space');
 
         function destroyAsteroid(index) {
             let x = asteroids[index].x;

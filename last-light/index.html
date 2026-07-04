@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Last Light</title>
+    <style>
+        :root {
+            --bg: #07080f;
+            --fg: #e8eaf2;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg);
+            color: var(--fg);
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .score-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        #score {
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        #best {
+            font-size: 14px;
+            opacity: 0.6;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(7, 8, 15, 0.85);
+            backdrop-filter: blur(4px);
+            z-index: 10;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        p {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            text-align: center;
+            max-width: 80%;
+        }
+
+        .hint {
+            font-size: 0.9rem;
+            opacity: 0.6;
+            position: absolute;
+            bottom: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="game"></canvas>
+    <div id="ui">
+        <div class="score-container">
+            <div id="score">0</div>
+            <div id="best">Best: 0</div>
+        </div>
+    </div>
+    <div id="start-screen" class="overlay">
+        <p>Sweep the light. Burn the shadows.</p>
+        <div class="hint">Tap or press Space to start</div>
+    </div>
+    <div id="death-screen" class="overlay hidden">
+        <h1>The light went out</h1>
+        <p id="final-score-text">Score: 0</p>
+        <p id="final-best-text" style="font-size: 1rem; opacity: 0.6; margin-top: -1.5rem;">Best: 0</p>
+        <div class="hint">Tap or press Space to relight</div>
+    </div>
+    <div id="pause-screen" class="overlay hidden">
+        <h1>Paused</h1>
+        <div class="hint">Tap or press any key to resume</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const bestEl = document.getElementById('best');
+        const startScreen = document.getElementById('start-screen');
+        const deathScreen = document.getElementById('death-screen');
+        const pauseScreen = document.getElementById('pause-screen');
+        const finalScoreText = document.getElementById('final-score-text');
+
+        let width, height, dpr, u;
+        let lastTime = 0, gameActive = false, paused = false, firstLaunch = true;
+        let gameTime = 0, spawnTimer = 0, screenShake = 0, hitStop = 0;
+        let nearestDist = 1000, audioCtx = null, heartbeatNode = null;
+
+        const STATE = {
+            score: 0, best: 0, beamAngle: 0, targetAngle: 0, beamWidth: 50 * Math.PI / 180,
+            lanternRadius: 4, enemies: [], particles: [], motes: [], beamRecoil: 0, beamCollapse: 1
+        };
+
+        const ENEMY_TYPES = {
+            MOTH: { color: '#7c6cff', speed: 7, burnRate: 1/0.4, pts: 1, size: 1.5 },
+            SKITTER: { color: '#46c8ff', speed: 9, burnRate: 1/0.5, pts: 3, size: 1.5 },
+            SPLITTER: { color: '#ff6ec7', speed: 5, burnRate: 1/0.6, pts: 2, size: 2 },
+            TANK: { color: '#8b00ff', speed: 3, burnRate: 1/1.5, pts: 5, size: 3, visibleUnlit: true }
+        };
+
+        try { STATE.best = parseInt(localStorage.getItem('lastlight-best')) || 0; bestEl.textContent = `Best: ${STATE.best}`; } catch (e) {}
+
+        function resize() {
+            dpr = Math.min(window.devicePixelRatio || 1, 2);
+            width = window.innerWidth; height = window.innerHeight;
+            canvas.width = width * dpr; canvas.height = height * dpr;
+            ctx.scale(dpr, dpr);
+            u = Math.min(width, height) / 100;
+            STATE.motes = Array.from({ length: 40 }, () => ({
+                x: Math.random() * width, y: Math.random() * height,
+                vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, s: Math.random() * 0.5 + 0.2
+            }));
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            heartbeatNode = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            heartbeatNode.type = 'sine';
+            heartbeatNode.frequency.setValueAtTime(50, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            heartbeatNode.connect(gain);
+            gain.connect(audioCtx.destination);
+            heartbeatNode.start();
+
+            // We'll use a manual interval for heartbeat to easily scale BPM
+            let lastHeartbeat = 0;
+            const playHeartbeat = () => {
+                if (!gameActive || paused) { setTimeout(playHeartbeat, 500); return; }
+                const bpm = 50 + (1 - Math.min(1, nearestDist / 50)) * 100;
+                const interval = 60000 / bpm;
+
+                const osc = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(60, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.1);
+                g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.connect(g); g.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+
+                setTimeout(playHeartbeat, interval);
+            };
+            playHeartbeat();
+        }
+
+        function playSound(freq, type, dur, vol) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            g.gain.setValueAtTime(vol, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+            osc.connect(g); g.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + dur);
+        }
+
+        const keys = {};
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if (e.code === 'Space') handleAction();
+            if (e.code === 'KeyP') togglePause();
+            if (paused && e.code !== 'KeyP') togglePause();
+        });
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        canvas.addEventListener('mousemove', e => updateTargetAngle(e.clientX, e.clientY));
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            initAudio();
+            if (e.touches.length > 0) {
+                const t = e.touches[0];
+                updateTargetAngle(t.clientX, t.clientY);
+                handleAction();
+                if (paused) togglePause();
+            }
+        }, { passive: false });
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (e.touches.length > 0) { updateTargetAngle(e.touches[0].clientX, e.touches[0].clientY); }
+        }, { passive: false });
+
+        function updateTargetAngle(x, y) {
+            const dx = x - width / 2, dy = y - height / 2;
+            STATE.targetAngle = Math.atan2(dy, dx);
+        }
+
+        function handleAction() {
+            initAudio();
+            if (firstLaunch) { firstLaunch = false; startScreen.classList.add('hidden'); startGame(); }
+            else if (!gameActive) { deathScreen.classList.add('hidden'); startGame(); }
+        }
+
+        function togglePause() {
+            if (!gameActive) return;
+            paused = !paused;
+            pauseScreen.classList.toggle('hidden', !paused);
+            if (!paused) lastTime = performance.now();
+        }
+
+        document.addEventListener('visibilitychange', () => { if (document.hidden && gameActive && !paused) togglePause(); });
+
+        function startGame() {
+            STATE.score = 0; scoreEl.textContent = '0';
+            STATE.enemies = []; STATE.particles = [];
+            gameTime = 0; spawnTimer = 0; screenShake = 0; hitStop = 0;
+            STATE.beamRecoil = 0; STATE.beamCollapse = 1;
+            gameActive = true; paused = false; lastTime = performance.now();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            deathScreen.classList.remove('hidden');
+            finalScoreText.textContent = `Score: ${STATE.score}`;
+            if (STATE.score > STATE.best) {
+                STATE.best = STATE.score;
+                try { localStorage.setItem('lastlight-best', STATE.best); } catch(e) {}
+            }
+            bestEl.textContent = `Best: ${STATE.best}`;
+            document.getElementById('final-best-text').textContent = `Best: ${STATE.best}`;
+            playSound(100, 'sawtooth', 0.5, 0.2); // Death rumble
+        }
+
+        function normalizeAngle(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+
+        function spawnEnemy() {
+            if (STATE.enemies.length >= 28) return;
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.sqrt((width/2)**2 + (height/2)**2) + 4 * u;
+            const x = width / 2 + Math.cos(angle) * dist, y = height / 2 + Math.sin(angle) * dist;
+            let type;
+            if (gameTime > 90 && Math.random() < 0.15) type = 'TANK';
+            else if (gameTime > 60 && Math.random() < 0.2) type = 'SPLITTER';
+            else if (gameTime > 30 && Math.random() < 0.25) type = 'SKITTER';
+            else type = 'MOTH';
+            STATE.enemies.push({ type, x, y, burn: 0, wobble: Math.random() * Math.PI * 2, skitterTimer: 0, skitterDir: 0, ...ENEMY_TYPES[type] });
+        }
+
+        function spawnParticles(x, y, color, count, velocityScale = 1) {
+            for (let i = 0; i < count; i++) {
+                if (STATE.particles.length >= 300) STATE.particles.shift();
+                STATE.particles.push({ x, y, vx: (Math.random() - 0.5) * 5 * velocityScale, vy: (Math.random() - 0.5) * 5 * velocityScale - 2, life: 1.0, color, size: Math.random() * 0.5 + 0.2 });
+            }
+        }
+
+        function update(dt) {
+            if (!gameActive) {
+                if (STATE.beamCollapse > 0) STATE.beamCollapse = Math.max(0, STATE.beamCollapse - dt / 0.6);
+                return;
+            }
+            if (paused) return;
+
+            if (hitStop > 0) { hitStop -= dt; return; }
+
+            gameTime += dt;
+            screenShake = Math.max(0, screenShake - dt * 10);
+            STATE.beamRecoil = Math.max(0, STATE.beamRecoil - dt * 10);
+
+            let rotationSpeed = 0;
+            if (keys['ArrowLeft'] || keys['KeyA']) rotationSpeed = -240 * Math.PI / 180;
+            if (keys['ArrowRight'] || keys['KeyD']) rotationSpeed = 240 * Math.PI / 180;
+            if (rotationSpeed !== 0) { STATE.beamAngle += rotationSpeed * dt; STATE.targetAngle = STATE.beamAngle; }
+            else {
+                const diff = normalizeAngle(STATE.targetAngle - STATE.beamAngle);
+                const maxRotation = 300 * Math.PI / 180 * dt;
+                STATE.beamAngle += Math.max(-maxRotation, Math.min(maxRotation, diff));
+            }
+            STATE.beamAngle = normalizeAngle(STATE.beamAngle);
+
+            STATE.motes.forEach(m => {
+                m.x += m.vx * dt * 10; m.y += m.vy * dt * 10;
+                if (m.x < 0) m.x = width; if (m.x > width) m.x = 0;
+                if (m.y < 0) m.y = height; if (m.y > height) m.y = 0;
+            });
+
+            for (let i = STATE.particles.length - 1; i >= 0; i--) {
+                const p = STATE.particles[i];
+                p.x += p.vx * dt * 20; p.y += p.vy * dt * 20; p.life -= dt * 1.5;
+                if (p.life <= 0) STATE.particles.splice(i, 1);
+            }
+
+            const spawnInterval = Math.max(0.45, 2.0 - (gameTime / 180) * (2.0 - 0.45));
+            spawnTimer += dt;
+            if (spawnTimer >= spawnInterval) { spawnEnemy(); spawnTimer = 0; }
+
+            nearestDist = 1000;
+            for (let i = STATE.enemies.length - 1; i >= 0; i--) {
+                const e = STATE.enemies[i];
+                const dx = width / 2 - e.x, dy = height / 2 - e.y, dist = Math.hypot(dx, dy), angleToCenter = Math.atan2(dy, dx);
+                nearestDist = Math.min(nearestDist, dist / u);
+
+                if (e.type === 'MOTH') { e.wobble += dt * Math.PI * 2; const w = Math.sin(e.wobble) * (10 * Math.PI / 180); e.x += Math.cos(angleToCenter + w) * e.speed * u * dt; e.y += Math.sin(angleToCenter + w) * e.speed * u * dt; }
+                else if (e.type === 'SKITTER') {
+                    if (e.skitterTimer > 0) { e.x += Math.cos(angleToCenter + e.skitterDir) * 20 * u * dt; e.y += Math.sin(angleToCenter + e.skitterDir) * 20 * u * dt; e.skitterTimer -= dt; }
+                    else { e.x += Math.cos(angleToCenter) * e.speed * u * dt; e.y += Math.sin(angleToCenter) * e.speed * u * dt; }
+                } else { e.x += Math.cos(angleToCenter) * e.speed * u * dt; e.y += Math.sin(angleToCenter) * e.speed * u * dt; }
+
+                const enemyAngle = Math.atan2(e.y - height / 2, e.x - width / 2);
+                const angleDiff = Math.abs(normalizeAngle(enemyAngle - STATE.beamAngle));
+                if (angleDiff < STATE.beamWidth / 2) {
+                    e.burn += e.burnRate * dt;
+                    if (e.type === 'SKITTER' && e.burn > 0.15 && e.skitterTimer <= 0) { e.skitterTimer = 0.5; e.skitterDir = Math.random() < 0.5 ? Math.PI/2 : -Math.PI/2; }
+                    if (Math.random() < 0.3) spawnParticles(e.x, e.y, e.color, 1, 0.5);
+                } else { e.burn = Math.max(0, e.burn - (e.burnRate / 2) * dt); }
+
+                if (e.burn >= 1) {
+                    STATE.score += e.pts; scoreEl.textContent = STATE.score;
+                    spawnParticles(e.x, e.y, e.color, 15, 2);
+                    screenShake += 0.5; STATE.beamRecoil += 1.5;
+                    playSound(400 + Math.random() * 200, 'square', 0.05, 0.05); // Crackle
+                    if (e.type === 'SPLITTER' || e.type === 'TANK') hitStop = 0.04;
+                    if (e.type === 'SPLITTER') {
+                        const baseAngle = Math.atan2(height/2 - e.y, width/2 - e.x);
+                        [1, -1].forEach(side => { STATE.enemies.push({ type: 'MOTH', x: e.x + Math.cos(baseAngle + Math.PI/2) * side * u, y: e.y + Math.sin(baseAngle + Math.PI/2) * side * u, burn: 0, wobble: Math.random() * Math.PI * 2, ...ENEMY_TYPES.MOTH }); });
+                    }
+                    STATE.enemies.splice(i, 1); continue;
+                }
+                if (dist < (STATE.lanternRadius + e.size) * u) gameOver();
+            }
+        }
+
+        function draw() {
+            ctx.save();
+            if (screenShake > 0) ctx.translate((Math.random()-0.5)*screenShake*u, (Math.random()-0.5)*screenShake*u);
+
+            ctx.fillStyle = '#07080f';
+            ctx.fillRect(0, 0, width, height);
+            const cx = width / 2, cy = height / 2;
+
+            STATE.motes.forEach(m => {
+                const angle = Math.atan2(m.y - cy, m.x - cx);
+                if (Math.abs(normalizeAngle(angle - STATE.beamAngle)) < STATE.beamWidth / 2) {
+                    ctx.fillStyle = 'rgba(255, 255, 200, 0.3)'; ctx.beginPath(); ctx.arc(m.x, m.y, m.s * u, 0, Math.PI * 2); ctx.fill();
+                }
+            });
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(STATE.beamAngle + (Math.random()-0.5) * STATE.beamRecoil * Math.PI / 180);
+            const beamRadius = Math.max(width, height);
+            const grad = ctx.createRadialGradient(0,0,0,0,0,beamRadius);
+            grad.addColorStop(0, `rgba(255, 220, 150, ${0.4 * STATE.beamCollapse})`);
+            grad.addColorStop(0.5, `rgba(255, 220, 150, ${0.15 * STATE.beamCollapse})`);
+            grad.addColorStop(1, 'rgba(255, 220, 150, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath(); ctx.moveTo(0,0);
+            ctx.arc(0,0, beamRadius, -STATE.beamWidth/2 * STATE.beamCollapse, STATE.beamWidth/2 * STATE.beamCollapse);
+            ctx.fill();
+            ctx.restore();
+
+            STATE.particles.forEach(p => {
+                ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.size * u, 0, Math.PI * 2); ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+
+            STATE.enemies.forEach(e => {
+                const angle = Math.atan2(e.y - cy, e.x - cx);
+                const inBeam = gameActive && Math.abs(normalizeAngle(angle - STATE.beamAngle)) < STATE.beamWidth / 2;
+                let alpha = inBeam ? 1 : 0.04;
+                if (!inBeam && e.visibleUnlit) alpha = 0.15;
+                if (!inBeam && Math.random() < 0.01) alpha = 0.2;
+                ctx.globalAlpha = alpha; ctx.fillStyle = e.color;
+                if (inBeam) { ctx.shadowBlur = 10; ctx.shadowColor = e.color; }
+                ctx.beginPath(); ctx.arc(e.x, e.y, e.size * u, 0, Math.PI * 2); ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+            ctx.globalAlpha = 1;
+
+            ctx.fillStyle = '#ffd700'; ctx.shadowBlur = 15; ctx.shadowColor = '#ffd700';
+            ctx.beginPath(); ctx.arc(cx, cy, STATE.lanternRadius * u * STATE.beamCollapse, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Vignette
+            const vigGrad = ctx.createRadialGradient(cx, cy, 20 * u, cx, cy, 60 * u);
+            const vigIntensity = Math.min(0.8, (1 - Math.min(1, nearestDist / 60)) * 0.8);
+            vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+            vigGrad.addColorStop(1, `rgba(0,0,0,${vigIntensity})`);
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.restore();
+        }
+
+        function loop(t) {
+            const dt = Math.min(t - lastTime, 50) / 1000;
+            lastTime = t; update(dt); draw();
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
+    </script>
+</body>
+</html>

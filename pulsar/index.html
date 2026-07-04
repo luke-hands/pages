@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pulsar</title>
+    <style>
+        :root {
+            --bg: #07080f;
+            --accent: #7c6cff;
+            --player: #46c8ff;
+            --bullet: #ff6ec7;
+            --ui-font: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg);
+            color: white;
+            font-family: var(--ui-font);
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px;
+        }
+
+        #score-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        #score {
+            font-size: 3rem;
+            font-weight: 800;
+            color: var(--accent);
+            text-shadow: 0 0 10px rgba(124, 108, 255, 0.5);
+        }
+
+        #best-score {
+            font-size: 1rem;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: -5px;
+        }
+
+        #overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(7, 8, 15, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            pointer-events: auto;
+            text-align: center;
+        }
+
+        #overlay h1 {
+            font-size: 4rem;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+            letter-spacing: 0.2rem;
+        }
+
+        #overlay .hint {
+            font-size: 1.2rem;
+            color: var(--player);
+            margin-bottom: 2rem;
+        }
+
+        #overlay .final-score {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        #overlay .restart-msg {
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.6);
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        #mute-toggle {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            pointer-events: auto;
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui">
+        <div id="score-container">
+            <div id="score">0</div>
+            <div id="best-score">BEST: 0</div>
+        </div>
+
+        <div id="overlay">
+            <h1 id="title">PULSAR</h1>
+            <p class="hint" id="hint">tap: reverse • hold: dive</p>
+            <div id="game-over-info" class="hidden">
+                <p class="final-score">SCORE: <span id="final-score-val">0</span></p>
+            </div>
+            <p class="restart-msg">tap or press Space to start</p>
+        </div>
+
+        <button id="mute-toggle">Mute</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const bestScoreEl = document.getElementById('best-score');
+        const overlay = document.getElementById('overlay');
+        const titleEl = document.getElementById('title');
+        const hintEl = document.getElementById('hint');
+        const gameOverInfo = document.getElementById('game-over-info');
+        const finalScoreVal = document.getElementById('final-score-val');
+        const muteToggle = document.getElementById('mute-toggle');
+
+        let width, height, minDim, dpr;
+        let outerRadius, innerRadius, coreRadius, flareRadius;
+
+        function resize() {
+            dpr = window.devicePixelRatio || 1;
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            ctx.scale(dpr, dpr);
+
+            minDim = Math.min(width, height);
+            outerRadius = 0.34 * minDim;
+            innerRadius = 0.20 * minDim;
+            coreRadius = 0.07 * minDim;
+            flareRadius = 0.24 * minDim;
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Audio & Rhythm
+        let audioCtx;
+        let masterGain;
+        const BPM_START = 100;
+        const BPM_INC = 6;
+        const BPM_CAP = 180;
+
+        const rhythm = {
+            bpm: BPM_START,
+            beatDuration: 60 / BPM_START,
+            nextBeatTime: 0,
+            beatCount: 0,
+            measureCount: 0,
+            started: false
+        };
+
+        function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = audioCtx.createGain();
+            masterGain.connect(audioCtx.destination);
+            updateMute();
+        }
+
+        function updateMute() {
+            if (masterGain) {
+                masterGain.gain.setTargetAtTime(state.muted ? 0 : 1, audioCtx.currentTime, 0.02);
+            }
+            muteToggle.textContent = state.muted ? 'Unmute' : 'Mute';
+        }
+
+        function playKick(time) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(masterGain);
+
+            osc.frequency.setValueAtTime(150, time);
+            osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.5);
+            gain.gain.setValueAtTime(0.5, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+
+            osc.start(time);
+            osc.stop(time + 0.5);
+        }
+
+        function playHat(time) {
+            const bufferSize = audioCtx.sampleRate * 0.05;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+            const source = audioCtx.createBufferSource();
+            source.buffer = buffer;
+            const gain = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+
+            filter.type = 'highpass';
+            filter.frequency.value = 7000;
+
+            source.connect(filter);
+            filter.connect(gain);
+            gain.connect(masterGain);
+
+            gain.gain.setValueAtTime(0.1, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+
+            source.start(time);
+        }
+
+        let droneOsc;
+        function startDrone() {
+            if (droneOsc) return;
+            droneOsc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            droneOsc.type = 'sawtooth';
+            droneOsc.frequency.value = 50;
+
+            const lpf = audioCtx.createBiquadFilter();
+            lpf.type = 'lowpass';
+            lpf.frequency.value = 200;
+
+            droneOsc.connect(lpf);
+            lpf.connect(gain);
+            gain.connect(masterGain);
+
+            gain.gain.value = 0.05;
+            droneOsc.start();
+        }
+
+        function playLaser(time) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(masterGain);
+
+            osc.frequency.setValueAtTime(800, time);
+            osc.frequency.exponentialRampToValueAtTime(100, time + 0.1);
+            gain.gain.setValueAtTime(0.1, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+
+            osc.start(time);
+            osc.stop(time + 0.1);
+        }
+
+        function playThump() {
+            if (!audioCtx) return;
+            const time = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(masterGain);
+
+            osc.frequency.setValueAtTime(60, time);
+            osc.frequency.exponentialRampToValueAtTime(30, time + 0.2);
+            gain.gain.setValueAtTime(0.4, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+
+            osc.start(time);
+            osc.stop(time + 0.2);
+        }
+
+        const COLORS = {
+            bg: '#07080f',
+            accent: '#7c6cff',
+            player: '#46c8ff',
+            bullet: '#ff6ec7'
+        };
+
+        // Game State
+        const state = {
+            running: false,
+            gameOver: false,
+            score: 0,
+            bestScore: parseInt(localStorage.getItem('pulsar-best')) || 0,
+            muted: false,
+            lastTime: 0,
+            dt: 0,
+            visibilityPaused: false,
+            activePatterns: []
+        };
+
+        bestScoreEl.textContent = `BEST: ${state.bestScore}`;
+
+        function updateRhythm() {
+            if (!state.running || state.visibilityPaused) return;
+
+            const currentTime = audioCtx ? audioCtx.currentTime : performance.now() / 1000;
+
+            if (!rhythm.started) {
+                rhythm.nextBeatTime = currentTime + 0.1;
+                rhythm.started = true;
+            }
+
+            while (rhythm.nextBeatTime < currentTime + 0.1) {
+                const beatTime = rhythm.nextBeatTime;
+
+                // Trigger audio
+                if (audioCtx) {
+                    playKick(beatTime);
+                    if (rhythm.beatCount % 2 === 1) playHat(beatTime);
+                }
+
+                // Beat event
+                onBeat(rhythm.beatCount, rhythm.measureCount);
+
+                rhythm.beatCount++;
+                if (rhythm.beatCount >= 4) {
+                    rhythm.beatCount = 0;
+                    rhythm.measureCount++;
+                    // BPM Increase every measure
+                    rhythm.bpm = Math.min(BPM_CAP, BPM_START + rhythm.measureCount * BPM_INC);
+                    rhythm.beatDuration = 60 / rhythm.bpm;
+                }
+
+                rhythm.nextBeatTime += rhythm.beatDuration;
+            }
+        }
+
+        function startGame() {
+            initAudio();
+            startDrone();
+
+            state.running = true;
+            state.gameOver = false;
+            state.score = 0;
+            scoreEl.textContent = '0';
+
+            resetPlayer();
+            visuals.bullets = [];
+            visuals.telegraphs = [];
+            state.activePatterns = [];
+            scheduledEvents.length = 0;
+
+            rhythm.bpm = BPM_START;
+            rhythm.beatDuration = 60 / BPM_START;
+            rhythm.beatCount = 0;
+            rhythm.measureCount = 0;
+            rhythm.started = false;
+
+            overlay.classList.add('hidden');
+            gameOverInfo.classList.add('hidden');
+            hintEl.classList.remove('hidden');
+        }
+
+        function endGame() {
+            if (state.gameOver) return;
+            state.running = false;
+            state.gameOver = true;
+
+            visuals.shake = 8;
+            spawnDeathParticles();
+
+            if (state.score > state.bestScore) {
+                state.bestScore = Math.floor(state.score);
+                localStorage.setItem('pulsar-best', state.bestScore);
+                bestScoreEl.textContent = `BEST: ${state.bestScore}`;
+            }
+
+            // Hit stop
+            setTimeout(() => {
+                overlay.classList.remove('hidden');
+                gameOverInfo.classList.remove('hidden');
+                titleEl.textContent = 'GAME OVER';
+                hintEl.classList.add('hidden');
+                finalScoreVal.textContent = Math.floor(state.score);
+            }, 80);
+        }
+
+        function spawnDeathParticles() {
+            const pCount = 30;
+            const px = width/2 + Math.cos(player.angle) * player.radius * minDim;
+            const py = height/2 + Math.sin(player.angle) * player.radius * minDim;
+
+            for (let i = 0; i < pCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = (Math.random() * 5 + 2) * (minDim / 400);
+                visuals.particles.push({
+                    x: px,
+                    y: py,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 1.0,
+                    decay: 0.02 + Math.random() * 0.02,
+                    color: i % 2 === 0 ? COLORS.player : COLORS.bullet
+                });
+            }
+        }
+
+        function onBeat(beat, measure) {
+            if (!state.running) return;
+            state.score += (player.isDiving ? 2 : 1);
+            scoreEl.textContent = Math.floor(state.score);
+
+            visuals.pulse = 1.0;
+
+            // Spawn telegraphs and bullets based on patterns
+            // Every measure (4 beats), we might start a new pattern or difficulty step
+            if (beat === 0) {
+                schedulePattern(measure);
+            }
+
+            // Execute scheduled telegraphs and spawns
+            const currentTime = audioCtx ? audioCtx.currentTime : performance.now() / 1000;
+            executeScheduledEvents(currentTime);
+
+            // Measure confetti
+            if (measure > 0 && beat === 0) {
+                spawnConfetti();
+            }
+        }
+
+        const scheduledEvents = [];
+        function schedulePattern(measure) {
+            const patternType = Math.floor(Math.random() * 3);
+            const startTime = rhythm.nextBeatTime; // Starts on next beat (beat 1 of measure or soon)
+            const beatDur = rhythm.beatDuration;
+
+            if (patternType === 0) { // Radial Burst
+                const count = Math.min(24, 8 + Math.floor(measure / 2) * 2);
+                const gap1 = Math.floor(Math.random() * count);
+                const gap2 = (gap1 + Math.floor(count/3) + Math.floor(Math.random() * count/3)) % count;
+
+                // Telegraph one beat ahead
+                scheduledEvents.push({
+                    time: startTime,
+                    type: 'telegraph',
+                    data: { type: 'radial', count, gap1, gap2 }
+                });
+                // Spawn on the beat after telegraph
+                scheduledEvents.push({
+                    time: startTime + beatDur,
+                    type: 'spawn',
+                    data: { type: 'radial', count, gap1, gap2 }
+                });
+            } else if (patternType === 1) { // Rotating Arms
+                const arms = measure >= 8 ? 3 : 2;
+                const offset = Math.random() * Math.PI * 2;
+                scheduledEvents.push({
+                    time: startTime,
+                    type: 'telegraph',
+                    data: { type: 'arms', arms, offset }
+                });
+                scheduledEvents.push({
+                    time: startTime + beatDur,
+                    type: 'spawn',
+                    data: { type: 'arms', arms, offset, duration: beatDur * 4 }
+                });
+            } else if (patternType === 2) { // Shockwave
+                const gapAngle = Math.random() * Math.PI * 2;
+                scheduledEvents.push({
+                    time: startTime,
+                    type: 'telegraph',
+                    data: { type: 'shockwave', gapAngle }
+                });
+                scheduledEvents.push({
+                    time: startTime + beatDur,
+                    type: 'spawn',
+                    data: { type: 'shockwave', gapAngle }
+                });
+            }
+
+            // Flare from measure 4
+            if (measure >= 4 && Math.random() > 0.5) {
+                const flareAngle = Math.random() * Math.PI * 2;
+                scheduledEvents.push({
+                    time: startTime + beatDur * 2,
+                    type: 'telegraph',
+                    data: { type: 'flare', angle: flareAngle }
+                });
+                scheduledEvents.push({
+                    time: startTime + beatDur * 3,
+                    type: 'spawn',
+                    data: { type: 'flare', angle: flareAngle }
+                });
+            }
+        }
+
+        function executeScheduledEvents(currentTime) {
+            for (let i = scheduledEvents.length - 1; i >= 0; i--) {
+                const ev = scheduledEvents[i];
+                if (ev.time <= currentTime + 0.02) {
+                    if (ev.type === 'telegraph') {
+                        visuals.telegraphs.push({ ...ev.data, startTime: ev.time, duration: rhythm.beatDuration });
+                    } else if (ev.type === 'spawn') {
+                        if (ev.data.type === 'arms') {
+                            state.activePatterns.push({
+                                ...ev.data,
+                                startTime: ev.time,
+                                duration: rhythm.beatDuration * 4,
+                                lastSpawn: 0
+                            });
+                        } else {
+                            spawnBullets(ev.data);
+                        }
+                        if (audioCtx) playLaser(ev.time);
+                    }
+                    scheduledEvents.splice(i, 1);
+                }
+            }
+        }
+
+        function spawnBullets(data) {
+            const tempoScale = 1.0 + (rhythm.bpm - 100) / (180 - 100) * 0.3;
+            const speed = 0.28 * minDim * tempoScale;
+
+            if (data.type === 'radial') {
+                for (let i = 0; i < data.count; i++) {
+                    if (i === data.gap1 || i === data.gap2 || i === (data.gap1+1)%data.count) continue;
+                    const angle = (i / data.count) * Math.PI * 2;
+                    visuals.bullets.push({
+                        x: width/2, y: height/2,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        r: 0.01 * minDim,
+                        type: 'normal'
+                    });
+                }
+            } else if (data.type === 'shockwave') {
+                visuals.bullets.push({
+                    x: width/2, y: height/2,
+                    radius: 0,
+                    speed: speed,
+                    gapAngle: data.gapAngle,
+                    gapSize: Math.PI / 3, // 60 degrees
+                    type: 'shockwave',
+                    r: 0.005 * minDim // thickness
+                });
+            } else if (data.type === 'flare') {
+                visuals.bullets.push({
+                    x: width/2, y: height/2,
+                    angle: data.angle,
+                    life: 1.0,
+                    type: 'flare'
+                });
+            }
+        }
+
+        function spawnConfetti() {
+            const count = 40;
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                const speed = (Math.random() * 3 + 2) * (minDim / 400);
+                visuals.particles.push({
+                    x: width/2 + Math.cos(angle) * outerRadius,
+                    y: height/2 + Math.sin(angle) * outerRadius,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 1.0,
+                    decay: 0.02,
+                    color: i % 2 === 0 ? COLORS.player : COLORS.accent
+                });
+            }
+        }
+
+        const visuals = {
+            pulse: 0,
+            shake: 0,
+            particles: [],
+            bullets: [],
+            telegraphs: []
+        };
+
+        const player = {
+            angle: 0,
+            dir: 1,
+            radius: 0.34, // normalized to minDim
+            targetRadius: 0.34,
+            isDiving: false,
+            collisionRadius: 0.013,
+            trail: []
+        };
+
+        function resetPlayer() {
+            player.angle = 0;
+            player.dir = 1;
+            player.radius = 0.34;
+            player.targetRadius = 0.34;
+            player.isDiving = false;
+            player.trail = [];
+        }
+
+        // Interaction
+        let inputDownTime = 0;
+        let isInputActive = false;
+
+        function handleInputStart() {
+            if (state.gameOver || !state.running) {
+                if (state.gameOver || !state.running) startGame();
+                return;
+            }
+
+            inputDownTime = Date.now();
+            isInputActive = true;
+
+            // Reverse direction instantly
+            player.dir *= -1;
+            spawnReversalParticles();
+        }
+
+        function handleInputEnd() {
+            isInputActive = false;
+            player.isDiving = false;
+            player.targetRadius = 0.34;
+        }
+
+        function checkHold() {
+            if (isInputActive && !player.isDiving) {
+                if (Date.now() - inputDownTime >= 150) {
+                    player.isDiving = true;
+                    player.targetRadius = 0.20;
+                }
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                if (!isInputActive) handleInputStart();
+                e.preventDefault();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') handleInputEnd();
+        });
+        window.addEventListener('pointerdown', (e) => {
+            if (e.target === muteToggle) return;
+            handleInputStart();
+        });
+        window.addEventListener('pointerup', handleInputEnd);
+
+        function spawnReversalParticles() {
+            const pCount = 8;
+            const r = player.radius * minDim;
+            const px = width/2 + Math.cos(player.angle) * r;
+            const py = height/2 + Math.sin(player.angle) * r;
+
+            for (let i = 0; i < pCount; i++) {
+                const angle = player.angle + (Math.random() - 0.5) * 0.5;
+                const speed = (Math.random() * 2 + 1) * (minDim / 400);
+                visuals.particles.push({
+                    x: px,
+                    y: py,
+                    vx: Math.cos(angle) * speed * -player.dir,
+                    vy: Math.sin(angle) * speed * -player.dir,
+                    life: 1.0,
+                    decay: 0.05 + Math.random() * 0.05,
+                    color: COLORS.player
+                });
+            }
+        }
+
+        muteToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.muted = !state.muted;
+            if (audioCtx) updateMute();
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                state.visibilityPaused = true;
+                if (audioCtx) audioCtx.suspend();
+            } else {
+                state.visibilityPaused = false;
+                if (audioCtx) audioCtx.resume();
+            }
+        });
+
+        // Main Loop
+        function loop(t) {
+            state.dt = Math.min(t - state.lastTime, 50);
+            state.lastTime = t;
+
+            update();
+            draw();
+
+            requestAnimationFrame(loop);
+        }
+
+        function update() {
+            if (!state.running || state.visibilityPaused) {
+                updateRhythm();
+                return;
+            }
+            updateRhythm();
+
+            const currentTime = audioCtx ? audioCtx.currentTime : performance.now() / 1000;
+
+            // Continuous patterns (Arms)
+            for (let i = state.activePatterns.length - 1; i >= 0; i--) {
+                const p = state.activePatterns[i];
+                if (currentTime > p.startTime + p.duration) {
+                    state.activePatterns.splice(i, 1);
+                    continue;
+                }
+
+                if (currentTime > p.lastSpawn + 0.1) {
+                    const elapsed = currentTime - p.startTime;
+                    const sweepAngle = elapsed * 0.5;
+                    const tempoScale = 1.0 + (rhythm.bpm - 100) / (180 - 100) * 0.3;
+                    const speed = 0.28 * minDim * tempoScale;
+
+                    for (let j = 0; j < p.arms; j++) {
+                        const angle = p.offset + (j / p.arms) * Math.PI * 2 + sweepAngle;
+                        visuals.bullets.push({
+                            x: width/2, y: height/2,
+                            vx: Math.cos(angle) * speed,
+                            vy: Math.sin(angle) * speed,
+                            r: 0.01 * minDim,
+                            type: 'normal'
+                        });
+                    }
+                    p.lastSpawn = currentTime;
+                }
+            }
+
+            checkHold();
+
+            const tempoScale = 1.0 + (rhythm.bpm - 100) / (180 - 100) * 0.7;
+            const baseSpeed = player.isDiving ? 2.3 : 1.6;
+            const angularSpeed = baseSpeed * tempoScale * player.dir;
+
+            player.angle += angularSpeed * (state.dt / 1000);
+
+            // Smooth radius transition
+            const radiusEase = 1.0 - Math.pow(0.001, state.dt / 250);
+            player.radius += (player.targetRadius - player.radius) * radiusEase;
+
+            // Player trail
+            player.trail.push({
+                x: width/2 + Math.cos(player.angle) * player.radius * minDim,
+                y: height/2 + Math.sin(player.angle) * player.radius * minDim,
+                life: 1.0
+            });
+            if (player.trail.length > 20) player.trail.shift();
+
+            // Particles
+            for (let i = visuals.particles.length - 1; i >= 0; i--) {
+                const p = visuals.particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= p.decay;
+                if (p.life <= 0) visuals.particles.splice(i, 1);
+            }
+
+            // Bullets
+            const px = width/2 + Math.cos(player.angle) * player.radius * minDim;
+            const py = height/2 + Math.sin(player.angle) * player.radius * minDim;
+            const pr = player.collisionRadius * minDim;
+
+            for (let i = visuals.bullets.length - 1; i >= 0; i--) {
+                const b = visuals.bullets[i];
+                if (b.type === 'normal') {
+                    b.x += b.vx * (state.dt / 1000);
+                    b.y += b.vy * (state.dt / 1000);
+
+                    // Collision
+                    const dx = b.x - px;
+                    const dy = b.y - py;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist < b.r + pr) endGame();
+                    if (dist < (b.r + pr) * 2.5) triggerNearMiss();
+
+                    if (Math.abs(b.x - width/2) > width || Math.abs(b.y - height/2) > height) {
+                        visuals.bullets.splice(i, 1);
+                    }
+                } else if (b.type === 'shockwave') {
+                    b.radius += b.speed * (state.dt / 1000);
+
+                    // Collision
+                    const dist = Math.abs(b.radius - player.radius * minDim);
+                    if (dist < pr) {
+                        const angle = Math.atan2(py - height/2, px - width/2);
+                        let diff = Math.abs(angle - b.gapAngle);
+                        while (diff > Math.PI) diff = Math.abs(diff - Math.PI * 2);
+                        if (diff > b.gapSize / 2) endGame();
+                    }
+
+                    if (b.radius > minDim * 1.5) visuals.bullets.splice(i, 1);
+                } else if (b.type === 'flare') {
+                    b.life -= 0.02 * (state.dt / 16.6);
+                    if (b.life <= 0) {
+                        visuals.bullets.splice(i, 1);
+                    } else if (player.isDiving) {
+                        // Collision with flare (only inner ring)
+                        const angle = Math.atan2(py - height/2, px - width/2);
+                        let diff = Math.abs(angle - b.angle);
+                        while (diff > Math.PI) diff = Math.abs(diff - Math.PI * 2);
+                        if (diff < 0.2) endGame();
+                    }
+                }
+            }
+
+            // Telegraphs
+            for (let i = visuals.telegraphs.length - 1; i >= 0; i--) {
+                const t = visuals.telegraphs[i];
+                if (audioCtx && t.startTime + t.duration <= audioCtx.currentTime) {
+                    visuals.telegraphs.splice(i, 1);
+                }
+            }
+
+            // Screen shake
+            visuals.shake *= 0.9;
+            visuals.pulse *= 0.9;
+        }
+
+        function triggerNearMiss() {
+            if (visuals.shake < 2) {
+                visuals.shake = 4;
+                playThump();
+            }
+        }
+
+        function draw() {
+            // Motion trails effect: semi-transparent clear
+            ctx.fillStyle = 'rgba(7, 8, 15, 0.25)';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.save();
+            if (visuals.shake > 0.5) {
+                ctx.translate((Math.random() - 0.5) * visuals.shake, (Math.random() - 0.5) * visuals.shake);
+            }
+
+            // Core / Star
+            const pulseScale = 1.0 + visuals.pulse * 0.12;
+            const currentCoreR = coreRadius * pulseScale;
+
+            // Bloom
+            const grad = ctx.createRadialGradient(width/2, height/2, 0, width/2, height/2, currentCoreR * 3);
+            grad.addColorStop(0, 'rgba(124, 108, 255, 0.3)');
+            grad.addColorStop(1, 'transparent');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(width/2, height/2, currentCoreR * 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = COLORS.accent;
+            ctx.beginPath();
+            ctx.arc(width/2, height/2, currentCoreR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Rings (guidelines)
+            ctx.strokeStyle = 'rgba(124, 108, 255, 0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(width/2, height/2, 0.34 * minDim, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(width/2, height/2, 0.20 * minDim, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Player Trail
+            ctx.lineWidth = player.collisionRadius * 2 * minDim;
+            ctx.lineCap = 'round';
+            for (let i = 1; i < player.trail.length; i++) {
+                const p1 = player.trail[i-1];
+                const p2 = player.trail[i];
+                const alpha = (i / player.trail.length) * 0.5;
+                ctx.strokeStyle = `rgba(70, 200, 255, ${alpha})`;
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+
+            // Player
+            const px = width/2 + Math.cos(player.angle) * player.radius * minDim;
+            const py = height/2 + Math.sin(player.angle) * player.radius * minDim;
+            ctx.fillStyle = COLORS.player;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = COLORS.player;
+            ctx.beginPath();
+            ctx.arc(px, py, player.collisionRadius * minDim, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Bullets
+            const beatPhase = (rhythm.nextBeatTime - (audioCtx ? audioCtx.currentTime : 0)) / rhythm.beatDuration;
+            const bulletColor = beatPhase > 0.5 ? COLORS.bullet : COLORS.player;
+
+            for (const b of visuals.bullets) {
+                if (b.type === 'normal') {
+                    ctx.fillStyle = bulletColor;
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (b.type === 'shockwave') {
+                    ctx.strokeStyle = bulletColor;
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.arc(width/2, height/2, b.radius, b.gapAngle + b.gapSize/2, b.gapAngle + Math.PI * 2 - b.gapSize/2);
+                    ctx.stroke();
+                } else if (b.type === 'flare') {
+                    ctx.fillStyle = 'rgba(255, 110, 199, ' + b.life + ')';
+                    ctx.beginPath();
+                    ctx.moveTo(width/2, height/2);
+                    ctx.arc(width/2, height/2, flareRadius, b.angle - 0.2, b.angle + 0.2);
+                    ctx.fill();
+                }
+            }
+
+            // Telegraphs
+            ctx.lineWidth = 2;
+            for (const t of visuals.telegraphs) {
+                ctx.strokeStyle = 'rgba(70, 200, 255, 0.8)';
+                if (t.type === 'radial') {
+                    for (let i = 0; i < t.count; i++) {
+                        if (i === t.gap1 || i === t.gap2 || i === (t.gap1+1)%t.count) continue;
+                        const angle = (i / t.count) * Math.PI * 2;
+                        ctx.beginPath();
+                        ctx.moveTo(width/2, height/2);
+                        ctx.lineTo(width/2 + Math.cos(angle) * minDim, height/2 + Math.sin(angle) * minDim);
+                        ctx.stroke();
+                    }
+                } else if (t.type === 'arms') {
+                    for (let i = 0; i < t.arms; i++) {
+                        const angle = t.offset + (i / t.arms) * Math.PI * 2;
+                        ctx.beginPath();
+                        ctx.moveTo(width/2, height/2);
+                        ctx.lineTo(width/2 + Math.cos(angle) * minDim, height/2 + Math.sin(angle) * minDim);
+                        ctx.stroke();
+                    }
+                } else if (t.type === 'shockwave') {
+                    ctx.beginPath();
+                    ctx.arc(width/2, height/2, 0.4 * minDim, t.gapAngle + t.gapSize/2, t.gapAngle + Math.PI * 2 - t.gapSize/2);
+                    ctx.stroke();
+                } else if (t.type === 'flare') {
+                    ctx.fillStyle = 'rgba(70, 200, 255, 0.3)';
+                    ctx.beginPath();
+                    ctx.moveTo(width/2, height/2);
+                    ctx.arc(width/2, height/2, flareRadius, t.angle - 0.2, t.angle + 0.2);
+                    ctx.fill();
+                }
+            }
+
+            // Particles
+            for (const p of visuals.particles) {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1.0;
+
+            ctx.restore();
+        }
+
+        // Start loop
+        requestAnimationFrame(t => {
+            state.lastTime = t;
+            requestAnimationFrame(loop);
+        });
+
+    </script>
+</body>
+</html>

@@ -134,6 +134,70 @@
             margin-bottom: 30px;
         }
 
+        #menu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(7, 8, 15, 0.95);
+            border: 2px solid var(--violet);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 200;
+            backdrop-filter: blur(10px);
+            width: 90%;
+            max-width: 500px;
+        }
+
+        #menu h1 {
+            font-size: 42px;
+            margin-bottom: 20px;
+            color: var(--fg);
+            text-shadow: 0 0 20px var(--violet);
+        }
+
+        .instructions {
+            text-align: left;
+            margin-bottom: 30px;
+            line-height: 1.6;
+            color: #8a90a6;
+            list-style: none;
+        }
+
+        .instructions li {
+            margin-bottom: 12px;
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .instructions li::before {
+            content: "»";
+            position: absolute;
+            left: 0;
+            color: var(--violet);
+        }
+
+        .btn {
+            background: var(--violet);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 0 15px var(--violet);
+            transition: transform 0.1s, box-shadow 0.1s;
+            pointer-events: auto;
+            font-family: inherit;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+            box-shadow: 0 0 5px var(--violet);
+        }
+
         @media (prefers-reduced-motion: reduce) {
             * { animation: none !important; transition: none !important; }
         }
@@ -143,6 +207,18 @@
     <div id="ink-meter-container">
         <div id="ink-meter"></div>
     </div>
+
+    <div id="menu">
+        <h1>NEON SCRAWL</h1>
+        <ul class="instructions">
+            <li>Draw lines to bounce motes into matching basins.</li>
+            <li>Matching colors increases score and combo multiplier.</li>
+            <li>Drawings use ink (top bar). Ink refills over time.</li>
+            <li>Multi-touch enabled: draw multiple lines at once.</li>
+        </ul>
+        <button class="btn" id="start-btn">START GAME</button>
+    </div>
+
     <div id="ui">
         <div class="stats-left">
             <div class="score-container">SCORE: <span id="score">0</span></div>
@@ -160,7 +236,8 @@
             Score: <span id="final-score">0</span><br>
             Best: <span id="final-best">0</span>
         </div>
-        <p>Tap to restart</p>
+        <button class="btn" id="how-to-play-btn" style="margin-bottom: 20px;">HOW TO PLAY</button>
+        <p>Tap anywhere else to restart</p>
     </div>
 
     <canvas id="canvas"></canvas>
@@ -174,12 +251,15 @@
         const livesEl = document.getElementById('lives');
         const inkMeter = document.getElementById('ink-meter');
         const gameOverEl = document.getElementById('game-over');
+        const menuEl = document.getElementById('menu');
+        const startBtn = document.getElementById('start-btn');
+        const howToPlayBtn = document.getElementById('how-to-play-btn');
         const finalScoreEl = document.getElementById('final-score');
         const finalBestEl = document.getElementById('final-best');
 
         let width, height, dpr;
         let score = 0, bestScore = 0, combo = 1, lives = 3;
-        let gameActive = true;
+        let gameActive = false;
         let lastTime = 0;
         let spawnTimer = 0;
         let spawnInterval = 2200;
@@ -189,8 +269,7 @@
         let particles = [];
         let inkAmount = 0;
         let inkCapacity = 0;
-        let isDrawing = false;
-        let currentStroke = null;
+        let activeStrokes = new Map();
         let gameTime = 0;
         let shake = 0;
         let gridPulse = 0;
@@ -207,7 +286,7 @@
             bestScore = parseInt(localStorage.getItem('neonScrawlBest') || '0');
             bestScoreEl.textContent = bestScore;
             resize();
-            resetGame();
+            menuEl.style.display = 'block';
             requestAnimationFrame(loop);
         }
 
@@ -246,6 +325,7 @@
             lives = 3;
             motes = [];
             strokes = [];
+            activeStrokes.clear();
             particles = [];
             spawnInterval = 2200;
             spawnTimer = 0;
@@ -253,6 +333,7 @@
             gameActive = true;
             inkAmount = inkCapacity;
             gameOverEl.style.display = 'none';
+            menuEl.style.display = 'none';
             updateUI();
 
             const bw = width * 0.22;
@@ -573,6 +654,7 @@
             for (const s of strokes) drawStroke(s);
             for (const m of motes) m.draw();
             drawParticles();
+            drawActiveTouches();
 
             if (shake > 0) ctx.restore();
         }
@@ -661,52 +743,80 @@
             ctx.globalAlpha = 1;
         }
 
+        function drawActiveTouches() {
+            for (const [id, s] of activeStrokes) {
+                if (s.pointerType !== 'touch') continue;
+                const p = s.points[s.points.length - 1];
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 20, 0, Math.PI * 2);
+                ctx.strokeStyle = COLORS.violet;
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = 0.5;
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+                ctx.fillStyle = '#fff';
+                ctx.globalAlpha = 0.8;
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
         // Pointer Events
         window.addEventListener('pointerdown', e => {
             if (!gameActive) return;
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (inkAmount < inkCapacity * 0.1) return;
+            if (inkAmount < inkCapacity * 0.05) return;
 
-            isDrawing = true;
             const x = e.clientX;
             const y = e.clientY - (e.pointerType === 'touch' ? 60 : 0);
-            currentStroke = { points: [{x, y}], age: 0 };
-            strokes.push(currentStroke);
+            const stroke = { points: [{x, y}], age: 0, pointerType: e.pointerType };
+            activeStrokes.set(e.pointerId, stroke);
+            strokes.push(stroke);
             if (e.pointerType === 'touch') e.preventDefault();
         });
 
         window.addEventListener('pointermove', e => {
             if (e.pointerType === 'touch') e.preventDefault();
-            if (!isDrawing || !currentStroke) return;
+            const stroke = activeStrokes.get(e.pointerId);
+            if (!stroke) return;
 
             const x = e.clientX;
             const y = e.clientY - (e.pointerType === 'touch' ? 60 : 0);
-            const lastPoint = currentStroke.points[currentStroke.points.length - 1];
+            const lastPoint = stroke.points[stroke.points.length - 1];
             const dist = Math.hypot(x - lastPoint.x, y - lastPoint.y);
 
             if (dist > 6) {
                 if (inkAmount > dist) {
                     inkAmount -= dist;
-                    currentStroke.points.push({x, y});
+                    stroke.points.push({x, y});
                 } else {
-                    isDrawing = false;
-                    currentStroke = null;
+                    activeStrokes.delete(e.pointerId);
                 }
             }
         });
 
-        window.addEventListener('pointerup', () => {
-            isDrawing = false;
-            currentStroke = null;
-        });
+        const endStroke = e => activeStrokes.delete(e.pointerId);
+        window.addEventListener('pointerup', endStroke);
+        window.addEventListener('pointercancel', endStroke);
 
         window.addEventListener('keydown', e => {
             if (e.key.toLowerCase() === 'r') resetGame();
         });
 
-        gameOverEl.addEventListener('click', resetGame);
+        gameOverEl.addEventListener('click', e => {
+            if (e.target.id !== 'how-to-play-btn') resetGame();
+        });
+        startBtn.addEventListener('click', resetGame);
+        howToPlayBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            gameOverEl.style.display = 'none';
+            menuEl.style.display = 'block';
+        });
+
         window.addEventListener('touchstart', e => {
-            if (e.touches.length >= 2) resetGame();
+            if (e.touches.length >= 2 && !gameActive) resetGame();
         });
 
         window.addEventListener('resize', resize);

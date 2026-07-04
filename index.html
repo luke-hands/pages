@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Luke Hands — personal site. Something is coming soon.">
-<title>Luke Hands — Coming Soon</title>
+<meta name="description" content="Luke Hands — personal site. A gallery of browser toys and games.">
+<title>Luke Hands — Gallery</title>
 <style>
   :root {
     --bg: #07080f;
@@ -18,8 +18,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body {
-    height: 100%;
-    overflow: hidden;
+    min-height: 100%;
     background: var(--bg);
     color: var(--fg);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -31,9 +30,9 @@
     position: fixed;
     inset: 0;
     display: block;
+    z-index: 0;
   }
 
-  /* soft colour glow behind the content */
   .glow {
     position: fixed;
     left: 50%;
@@ -48,6 +47,7 @@
     filter: blur(10px);
     pointer-events: none;
     animation: breathe 9s ease-in-out infinite;
+    z-index: 0;
   }
 
   @keyframes breathe {
@@ -55,42 +55,24 @@
     50%      { opacity: 1;   transform: translate(-50%, -50%) scale(1.06); }
   }
 
-  main {
+  header {
     position: relative;
     z-index: 1;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    padding: 4rem 2rem 2rem;
     text-align: center;
-    padding: 2rem;
-    gap: 1.4rem;
-  }
-
-  .eyebrow {
-    font-size: 0.8rem;
-    letter-spacing: 0.45em;
-    text-indent: 0.45em; /* balance the tracking so text stays centred */
-    text-transform: uppercase;
-    color: var(--muted);
-    opacity: 0;
-    animation: rise 0.9s ease-out 0.2s forwards;
   }
 
   h1 {
-    font-size: clamp(2.6rem, 9vw, 6.5rem);
+    font-size: clamp(2.5rem, 8vw, 4rem);
     font-weight: 800;
-    line-height: 1.05;
-    letter-spacing: -0.02em;
+    margin-bottom: 0.5rem;
     background: linear-gradient(100deg, var(--fg) 20%, var(--accent-2) 45%, var(--accent-1) 60%, var(--fg) 85%);
     background-size: 200% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
     color: transparent;
-    animation: rise 0.9s ease-out 0.35s forwards, shimmer 7s linear 1.5s infinite;
-    opacity: 0;
+    animation: shimmer 7s linear infinite;
   }
 
   @keyframes shimmer {
@@ -98,86 +80,67 @@
     100% { background-position: -200% 0; }
   }
 
-  @keyframes rise {
-    from { opacity: 0; transform: translateY(14px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  .type-line {
-    min-height: 1.6em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: clamp(0.95rem, 2.6vw, 1.25rem);
+  .subtitle {
     color: var(--muted);
-    opacity: 0;
-    animation: rise 0.9s ease-out 0.55s forwards;
+    font-size: 1.1rem;
+    max-width: 600px;
+    margin: 0 auto;
   }
 
-  .type-line .prompt { color: var(--accent-2); }
-  .type-line .typed  { color: var(--fg); }
-
-  .cursor {
-    display: inline-block;
-    width: 0.55em;
-    height: 1.15em;
-    margin-left: 2px;
-    vertical-align: text-bottom;
-    background: var(--accent-1);
-    animation: blink 1.1s steps(1) infinite;
+  main {
+    position: relative;
+    z-index: 1;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
   }
 
-  @keyframes blink { 50% { opacity: 0; } }
-
-  .links {
-    display: flex;
-    gap: 1rem;
-    opacity: 0;
-    animation: rise 0.9s ease-out 0.75s forwards;
-  }
-
-  .links a {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.65rem 1.25rem;
-    border: 1px solid rgba(232, 234, 242, 0.18);
-    border-radius: 999px;
-    color: var(--fg);
-    text-decoration: none;
-    font-size: 0.9rem;
+  .card {
     background: rgba(232, 234, 242, 0.04);
-    backdrop-filter: blur(6px);
-    transition: border-color 0.25s ease, background 0.25s ease, transform 0.25s ease;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(232, 234, 242, 0.12);
+    border-radius: 16px;
+    padding: 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
-  .links a:hover {
+  .card:hover {
+    transform: translateY(-4px);
     border-color: var(--accent-1);
-    background: rgba(124, 108, 255, 0.12);
-    transform: translateY(-2px);
+    background: rgba(124, 108, 255, 0.08);
+    box-shadow: 0 10px 30px -10px rgba(124, 108, 255, 0.3);
   }
 
-  .links a svg { width: 18px; height: 18px; fill: currentColor; }
+  .card h2 {
+    font-size: 1.5rem;
+    color: var(--fg);
+  }
+
+  .card p {
+    color: var(--muted);
+    line-height: 1.5;
+  }
 
   footer {
-    position: fixed;
-    bottom: 1.25rem;
-    left: 0;
-    right: 0;
-    text-align: center;
-    font-size: 0.75rem;
-    color: var(--muted);
-    opacity: 0;
-    animation: rise 0.9s ease-out 1s forwards;
+    position: relative;
     z-index: 1;
+    padding: 4rem 2rem 2rem;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--muted);
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .glow, h1 { animation-iteration-count: 1; }
-    .eyebrow, h1, .type-line, .links, footer {
-      animation: none;
-      opacity: 1;
-      transform: none;
-    }
-    .cursor { animation: none; }
+    .glow, h1 { animation: none; }
+    .card:hover { transform: none; }
   }
 </style>
 </head>
@@ -185,56 +148,24 @@
 <canvas id="sky" aria-hidden="true"></canvas>
 <div class="glow" aria-hidden="true"></div>
 
-<main>
-  <p class="eyebrow">Coming soon</p>
+<header>
   <h1>Luke Hands</h1>
-  <p class="type-line" aria-live="polite">
-    <span class="prompt">$&nbsp;</span><span class="typed" id="typed"></span><span class="cursor"></span>
-  </p>
-  <nav class="links" aria-label="Links">
-    <a href="https://github.com/luke-hands" rel="me">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-      GitHub
-    </a>
-  </nav>
+  <p class="subtitle">A collection of small browser toys and games.</p>
+</header>
+
+<main>
+  <a href="./asteroids/" class="card">
+    <h2>Asteroids</h2>
+    <p>Retro space shooter with wraparound physics and jagged rocks.</p>
+  </a>
 </main>
 
-<footer>© <span id="year"></span> Luke Hands</footer>
+<footer>
+  <p>© <span id="year"></span> Luke Hands • <a href="https://github.com/luke-hands" style="color: inherit;">GitHub</a></p>
+</footer>
 
 <script>
   document.getElementById('year').textContent = new Date().getFullYear();
-
-  // --- typing effect -------------------------------------------------------
-  const phrases = [
-    'building something new...',
-    'git commit -m "watch this space"',
-    'npm run something-cool',
-    'deploying soon(ish)...',
-  ];
-  const typedEl = document.getElementById('typed');
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  if (reduceMotion) {
-    typedEl.textContent = phrases[0];
-  } else {
-    let phrase = 0, char = 0, deleting = false;
-    (function tick() {
-      const current = phrases[phrase];
-      char += deleting ? -1 : 1;
-      typedEl.textContent = current.slice(0, char);
-
-      let delay = deleting ? 35 : 60 + Math.random() * 60;
-      if (!deleting && char === current.length) {
-        delay = 2400;
-        deleting = true;
-      } else if (deleting && char === 0) {
-        deleting = false;
-        phrase = (phrase + 1) % phrases.length;
-        delay = 400;
-      }
-      setTimeout(tick, delay);
-    })();
-  }
 
   // --- constellation background -------------------------------------------
   const canvas = document.getElementById('sky');
@@ -258,7 +189,7 @@
       vx: (Math.random() - 0.5) * 0.18,
       vy: (Math.random() - 0.5) * 0.18,
       r: 0.6 + Math.random() * 1.4,
-      tw: Math.random() * Math.PI * 2, // twinkle phase
+      tw: Math.random() * Math.PI * 2,
     }));
   }
 
@@ -283,7 +214,6 @@
       ctx.fill();
     }
 
-    // faint lines between nearby stars, brighter near the pointer
     for (let i = 0; i < stars.length; i++) {
       for (let j = i + 1; j < stars.length; j++) {
         const a = stars[i], b = stars[j];
@@ -305,13 +235,13 @@
       }
     }
 
-    if (!reduceMotion) requestAnimationFrame(frame);
+    requestAnimationFrame(frame);
   }
 
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (!reduceMotion) {
     requestAnimationFrame(frame);
   } else {
-    // one static frame so the page still has its backdrop
     frame(0);
   }
 </script>

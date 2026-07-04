@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Loop Serpent — Luke Hands</title>
+    <style>
+        :root {
+            --bg: #07080f;
+            --serpent: #7c6cff;
+            --prey: #46c8ff;
+            --hunter: #ff6ec7;
+            --fg: #e8eaf2;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--fg);
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .hud-item {
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        #score-display { font-size: 24px; color: var(--fg); }
+        #multiplier-display { font-size: 18px; color: var(--serpent); }
+        #best-display { font-size: 14px; color: #8a90a6; }
+
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(7, 8, 15, 0.9);
+            padding: 2.5rem;
+            border: 2px solid var(--serpent);
+            border-radius: 16px;
+            display: none;
+            backdrop-filter: blur(8px);
+            z-index: 10;
+        }
+
+        #game-over h1 {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+            color: var(--serpent);
+            text-shadow: 0 0 20px rgba(124, 108, 255, 0.5);
+        }
+
+        #game-over p {
+            font-size: 1.2rem;
+            margin-bottom: 1.5rem;
+            color: #8a90a6;
+        }
+
+        .restart-hint {
+            font-size: 0.9rem;
+            color: var(--fg);
+            opacity: 0.8;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <div id="score-display" class="hud-item">0</div>
+        <div id="multiplier-display" class="hud-item">×1</div>
+        <div id="best-display" class="hud-item">Best: 0</div>
+    </div>
+
+    <div id="game-over">
+        <h1>CRASHED</h1>
+        <p>Score: <span id="final-score">0</span></p>
+        <p>Best: <span id="final-best">0</span></p>
+        <div class="restart-hint">Tap or Press Space to Restart</div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score-display');
+        const multiEl = document.getElementById('multiplier-display');
+        const bestEl = document.getElementById('best-display');
+        const gameOverEl = document.getElementById('game-over');
+        const finalScoreEl = document.getElementById('final-score');
+        const finalBestEl = document.getElementById('final-best');
+
+        let width, height, minDim, dpr;
+        let lastTime = 0;
+        let gameActive = false;
+        let paused = false;
+
+        // Serpent State
+        let serpent = {
+            headX: 0,
+            headY: 0,
+            angle: 0,
+            trail: [], // array of {x, y}
+            speed: 0,
+            turnRate: 3.4, // rad/s
+            maxLength: 0,
+            pointSpacing: 0,
+            lastPointDist: 0
+        };
+
+        let input = {
+            targetAngle: 0,
+            isUsingPointer: false,
+            keys: { left: false, right: false }
+        };
+
+        // Entities
+        let prey = [];
+        let hunters = [];
+        let startTime = 0;
+        let lastHunterSpawn = 0;
+
+        // Score State
+        let score = 0;
+        let multiplier = 1;
+        let bestScore = parseInt(localStorage.getItem('loop-serpent-best')) || 0;
+
+        // Visuals State
+        let particles = [];
+        let loops = []; // {poly, alpha, time}
+        let screenShake = 0;
+        let hitStop = 0;
+
+        // Audio State
+        let audioCtx = null;
+
+        function resize() {
+            dpr = Math.min(window.devicePixelRatio || 1, 2);
+            width = window.innerWidth;
+            height = window.innerHeight;
+            minDim = Math.min(width, height);
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            ctx.scale(dpr, dpr);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // visibility change
+        document.addEventListener('visibilitychange', () => {
+            paused = document.hidden;
+        });
+
+        function spawnPrey() {
+            const inset = minDim * 0.15;
+            let x, y;
+            let attempts = 0;
+            do {
+                x = Math.random() * (width - inset * 2) + inset;
+                y = Math.random() * (height - inset * 2) + inset;
+                attempts++;
+            } while (attempts < 10 && Math.hypot(x - serpent.headX, y - serpent.headY) < minDim * 0.15);
+
+            prey.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 0.05 * minDim,
+                vy: (Math.random() - 0.5) * 0.05 * minDim,
+                radius: 4
+            });
+        }
+
+        function spawnHunter() {
+            if (hunters.length >= 5) return;
+            const side = Math.floor(Math.random() * 4);
+            let x, y;
+            if (side === 0) { x = 0; y = Math.random() * height; }
+            else if (side === 1) { x = width; y = Math.random() * height; }
+            else if (side === 2) { x = Math.random() * width; y = 0; }
+            else { x = Math.random() * width; y = height; }
+
+            hunters.push({
+                x, y,
+                angle: Math.random() * Math.PI * 2,
+                speed: serpent.speed * 0.85,
+                turnRate: 2.0,
+                radius: 8
+            });
+        }
+
+        function updateHUD() {
+            scoreEl.textContent = Math.floor(score);
+            multiEl.textContent = `×${multiplier}`;
+            bestEl.textContent = `Best: ${bestScore}`;
+        }
+
+        const COLORS = {
+            bg: '#07080f',
+            serpent: '#7c6cff',
+            prey: '#46c8ff',
+            hunter: '#ff6ec7',
+            fg: '#e8eaf2'
+        };
+
+        function init() {
+            serpent.speed = 0.28 * minDim;
+            serpent.maxLength = 1.4 * minDim;
+            serpent.pointSpacing = 0.005 * minDim;
+            serpent.headX = width / 2;
+            serpent.headY = height / 2;
+            serpent.angle = -Math.PI / 2;
+            serpent.trail = [{x: serpent.headX, y: serpent.headY}];
+            serpent.lastPointDist = 0;
+
+            input.targetAngle = serpent.angle;
+            input.isUsingPointer = false;
+
+            prey = [];
+            for (let i = 0; i < 8; i++) spawnPrey();
+            hunters = [];
+            startTime = performance.now();
+            lastHunterSpawn = 0;
+
+            score = 0;
+            multiplier = 1;
+            updateHUD();
+
+            gameActive = true;
+            gameOverEl.style.display = 'none';
+            lastTime = performance.now();
+            requestAnimationFrame(loop);
+        }
+
+        function update(dt) {
+            if (!gameActive || paused) return;
+
+            if (hitStop > 0) {
+                hitStop -= dt * 1000;
+                return;
+            }
+
+            // Handle Steering
+            let desiredTurn = 0;
+            if (input.keys.left) desiredTurn = -serpent.turnRate;
+            else if (input.keys.right) desiredTurn = serpent.turnRate;
+            else if (input.isUsingPointer) {
+                let diff = input.targetAngle - serpent.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                desiredTurn = Math.sign(diff) * Math.min(Math.abs(diff) / dt, serpent.turnRate);
+            }
+
+            serpent.angle += desiredTurn * dt;
+
+            // Move Head
+            const dx = Math.cos(serpent.angle) * serpent.speed * dt;
+            const dy = Math.sin(serpent.angle) * serpent.speed * dt;
+            serpent.headX += dx;
+            serpent.headY += dy;
+
+            // Wall Collision
+            const inset = minDim * 0.02;
+            if (serpent.headX < inset || serpent.headX > width - inset ||
+                serpent.headY < inset || serpent.headY > height - inset) {
+                gameOver();
+                return;
+            }
+
+            // Trail Management
+            const moveDist = Math.sqrt(dx * dx + dy * dy);
+            serpent.lastPointDist += moveDist;
+
+            if (serpent.lastPointDist >= serpent.pointSpacing) {
+                serpent.trail.unshift({x: serpent.headX, y: serpent.headY});
+                serpent.lastPointDist = 0;
+            } else {
+                // Update the very first point to head pos to keep trail connected
+                serpent.trail[0].x = serpent.headX;
+                serpent.trail[0].y = serpent.headY;
+            }
+
+            // Trim Trail
+            let totalDist = 0;
+            let trimIdx = -1;
+            for (let i = 0; i < serpent.trail.length - 1; i++) {
+                const d = Math.hypot(serpent.trail[i].x - serpent.trail[i+1].x, serpent.trail[i].y - serpent.trail[i+1].y);
+                totalDist += d;
+                if (totalDist > serpent.maxLength) {
+                    trimIdx = i + 1;
+                    break;
+                }
+            }
+            if (trimIdx !== -1) {
+                serpent.trail.length = trimIdx + 1;
+            }
+
+            // Loop Detection
+            checkLoop();
+
+            // Update Entities
+            updateEntities(dt);
+
+            // Update Visuals
+            updateVisuals(dt);
+        }
+
+        function updateVisuals(dt) {
+            // Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                if (p.type === 'vortex') {
+                    const dx = serpent.headX - p.x;
+                    const dy = serpent.headY - p.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist < 10) {
+                        particles.splice(i, 1);
+                        continue;
+                    }
+                    p.x += (dx / dist) * p.speed * dt;
+                    p.y += (dy / dist) * p.speed * dt;
+                    p.life -= dt;
+                } else if (p.type === 'explosion') {
+                    p.x += p.vx * dt;
+                    p.y += p.vy * dt;
+                    p.life -= dt;
+                }
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+
+            // Loops
+            for (let i = loops.length - 1; i >= 0; i--) {
+                loops[i].alpha -= dt / 0.25;
+                if (loops[i].alpha <= 0) loops.splice(i, 1);
+            }
+
+            // Screen Shake
+            if (screenShake > 0) {
+                screenShake -= dt / 0.3;
+                if (screenShake < 0) screenShake = 0;
+            }
+        }
+
+        function updateEntities(dt) {
+            const now = (performance.now() - startTime) / 1000;
+
+            // Hunters Spawning
+            if (now > 10 && now - lastHunterSpawn > 15) {
+                spawnHunter();
+                lastHunterSpawn = now;
+            }
+
+            // Update Prey
+            prey.forEach(p => {
+                // Wander
+                p.vx += (Math.random() - 0.5) * 10 * dt;
+                p.vy += (Math.random() - 0.5) * 10 * dt;
+
+                // Limit speed to 5% minDim
+                const speed = Math.hypot(p.vx, p.vy);
+                const maxSpeed = 0.05 * minDim;
+                if (speed > maxSpeed) {
+                    p.vx = (p.vx / speed) * maxSpeed;
+                    p.vy = (p.vy / speed) * maxSpeed;
+                }
+
+                // Flee head
+                const dx = p.x - serpent.headX;
+                const dy = p.y - serpent.headY;
+                const dist = Math.hypot(dx, dy);
+                if (dist < minDim * 0.2) {
+                    const force = (1 - dist / (minDim * 0.2)) * 50;
+                    p.vx += (dx / dist) * force * dt;
+                    p.vy += (dy / dist) * force * dt;
+                }
+
+                // Drag
+                p.vx *= 0.98;
+                p.vy *= 0.98;
+
+                p.x += p.vx;
+                p.y += p.vy;
+
+                // Arena bounce
+                const inset = minDim * 0.02;
+                if (p.x < inset || p.x > width - inset) { p.vx *= -1; p.x = Math.max(inset, Math.min(width - inset, p.x)); }
+                if (p.y < inset || p.y > height - inset) { p.vy *= -1; p.y = Math.max(inset, Math.min(height - inset, p.y)); }
+            });
+
+            // Update Hunters
+            hunters.forEach(h => {
+                const dx = serpent.headX - h.x;
+                const dy = serpent.headY - h.y;
+                const targetAngle = Math.atan2(dy, dx);
+
+                let diff = targetAngle - h.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+
+                h.angle += Math.sign(diff) * Math.min(Math.abs(diff), h.turnRate * dt);
+
+                h.x += Math.cos(h.angle) * h.speed * dt;
+                h.y += Math.sin(h.angle) * h.speed * dt;
+
+                // Kill serpent
+                if (Math.hypot(h.x - serpent.headX, h.y - serpent.headY) < h.radius + 5) {
+                    gameOver();
+                }
+            });
+        }
+
+        function checkLoop() {
+            if (serpent.trail.length < 15) return;
+
+            // Test head segment against earlier trail segments
+            const head1 = serpent.trail[0];
+            const head2 = serpent.trail[1];
+
+            // Skip recent points
+            for (let i = 12; i < serpent.trail.length - 1; i++) {
+                const p3 = serpent.trail[i];
+                const p4 = serpent.trail[i + 1];
+
+                const intersect = getIntersection(head1.x, head1.y, head2.x, head2.y, p3.x, p3.y, p4.x, p4.y);
+                if (intersect) {
+                    // Loop closed!
+                    const loopPolygon = serpent.trail.slice(0, i + 1);
+                    loopPolygon.push(intersect); // Add the intersection point to close precisely
+
+                    handleCapture(loopPolygon);
+
+                    // Consume the trail slice
+                    serpent.trail.splice(0, i + 1);
+                    serpent.trail.unshift({x: serpent.headX, y: serpent.headY});
+                    break;
+                }
+            }
+        }
+
+        function getIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
+            const det = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+            if (det === 0) return null;
+
+            const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / det;
+            const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / det;
+
+            if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+                return {
+                    x: x1 + t * (x2 - x1),
+                    y: y1 + t * (y2 - y1)
+                };
+            }
+            return null;
+        }
+
+        function isPointInPolygon(px, py, polygon) {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                const xi = polygon[i].x, yi = polygon[i].y;
+                const xj = polygon[j].x, yj = polygon[j].y;
+                const intersect = ((yi > py) !== (yj > py)) &&
+                    (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+
+        function spawnVortex(polygon) {
+            // Find bounding box
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            polygon.forEach(p => {
+                minX = Math.min(minX, p.x);
+                maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y);
+                maxY = Math.max(maxY, p.y);
+            });
+
+            for (let i = 0; i < 300; i++) {
+                const x = Math.random() * (maxX - minX) + minX;
+                const y = Math.random() * (maxY - minY) + minY;
+                if (isPointInPolygon(x, y, polygon)) {
+                    particles.push({
+                        x, y,
+                        type: 'vortex',
+                        speed: (0.5 + Math.random() * 0.5) * minDim * 1.5,
+                        life: 0.6,
+                        color: COLORS.serpent
+                    });
+                }
+            }
+        }
+
+        function playArpeggio(count) {
+            if (!audioCtx) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const now = audioCtx.currentTime;
+            for (let i = 0; i < count; i++) {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                // +3 semitones per capture
+                const freq = 440 * Math.pow(2, (i * 3) / 12);
+                osc.frequency.setValueAtTime(freq, now + i * 0.1);
+
+                gain.gain.setValueAtTime(0.1, now + i * 0.1);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.1);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.start(now + i * 0.1);
+                osc.stop(now + i * 0.1 + 0.1);
+            }
+        }
+
+        function playDeathSound() {
+            if (!audioCtx) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.exponentialRampToValueAtTime(40, now + 0.5);
+
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.linearRampToValueAtTime(0, now + 0.5);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(now + 0.5);
+        }
+
+        function handleCapture(polygon) {
+            let capturedCount = 0;
+
+            // Capture Prey
+            for (let i = prey.length - 1; i >= 0; i--) {
+                if (isPointInPolygon(prey[i].x, prey[i].y, polygon)) {
+                    prey.splice(i, 1);
+                    capturedCount++;
+                    score += 10 * multiplier;
+                    spawnPrey();
+                }
+            }
+
+            // Capture Hunters
+            for (let i = hunters.length - 1; i >= 0; i--) {
+                if (isPointInPolygon(hunters[i].x, hunters[i].y, polygon)) {
+                    hunters.splice(i, 1);
+                    capturedCount++;
+                    score += 50 * multiplier;
+                }
+            }
+
+            if (capturedCount > 0) {
+                // Flash Fill
+                loops.push({poly: polygon, alpha: 0.35});
+                spawnVortex(polygon);
+
+                if (capturedCount >= 3) {
+                    hitStop = 90;
+                    screenShake = 1.0;
+                }
+
+                // Audio
+                playArpeggio(capturedCount);
+
+                // Each capture beyond the first raises multiplier by +1
+                multiplier = Math.min(8, multiplier + Math.max(0, capturedCount - 1));
+            } else {
+                multiplier = 1;
+            }
+
+            updateHUD();
+        }
+
+        function draw() {
+            ctx.save();
+            if (screenShake > 0) {
+                const amt = screenShake * 6;
+                ctx.translate((Math.random() - 0.5) * amt, (Math.random() - 0.5) * amt);
+            }
+
+            ctx.fillStyle = COLORS.bg;
+            ctx.fillRect(0, 0, width, height);
+
+            // Arena border
+            const inset = minDim * 0.02;
+            ctx.strokeStyle = 'rgba(124, 108, 255, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(inset, inset, width - inset * 2, height - inset * 2);
+
+            // Draw Entities
+            ctx.shadowBlur = 0;
+            prey.forEach(p => {
+                ctx.fillStyle = COLORS.prey;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            hunters.forEach(h => {
+                ctx.fillStyle = COLORS.hunter;
+                ctx.save();
+                ctx.translate(h.x, h.y);
+                ctx.rotate(h.angle);
+                ctx.beginPath();
+                ctx.moveTo(h.radius * 1.5, 0);
+                ctx.lineTo(-h.radius, -h.radius);
+                ctx.lineTo(-h.radius * 0.5, 0);
+                ctx.lineTo(-h.radius, h.radius);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            });
+
+            // Draw Trail
+            if (serpent.trail.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(serpent.trail[0].x, serpent.trail[0].y);
+                for (let i = 1; i < serpent.trail.length; i++) {
+                    ctx.lineTo(serpent.trail[i].x, serpent.trail[i].y);
+                }
+
+                // Color and glow scale with multiplier
+                const hueShift = (multiplier - 1) * 10;
+                ctx.strokeStyle = `hsl(${247 + hueShift}, 100%, ${65 + multiplier * 2}%)`;
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.shadowBlur = 5 + multiplier * 2;
+                ctx.shadowColor = ctx.strokeStyle;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            }
+
+            // Draw Loops (Flash Fill)
+            loops.forEach(l => {
+                ctx.fillStyle = `rgba(124, 108, 255, ${l.alpha})`;
+                ctx.beginPath();
+                ctx.moveTo(l.poly[0].x, l.poly[0].y);
+                for (let i = 1; i < l.poly.length; i++) ctx.lineTo(l.poly[i].x, l.poly[i].y);
+                ctx.closePath();
+                ctx.fill();
+            });
+
+            // Draw Particles
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, 2, 2);
+            });
+
+            ctx.restore();
+        }
+
+        function loop(time) {
+            const dt = Math.min((time - lastTime) / 1000, 0.1);
+            lastTime = time;
+
+            update(dt);
+            draw();
+
+            if (gameActive) {
+                requestAnimationFrame(loop);
+            }
+        }
+
+        // Inputs
+        window.addEventListener('keydown', e => {
+            if (!audioCtx && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'Space' || e.code === 'Enter')) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (e.code === 'ArrowLeft') input.keys.left = true;
+            if (e.code === 'ArrowRight') input.keys.right = true;
+            if (!gameActive && (e.code === 'Space' || e.code === 'Enter')) init();
+        });
+        window.addEventListener('keyup', e => {
+            if (e.code === 'ArrowLeft') input.keys.left = false;
+            if (e.code === 'ArrowRight') input.keys.right = false;
+        });
+
+        function handlePointer(e) {
+            if (!gameActive) return;
+            input.isUsingPointer = true;
+            const dx = e.clientX - serpent.headX;
+            const dy = e.clientY - serpent.headY;
+            input.targetAngle = Math.atan2(dy, dx);
+        }
+
+        window.addEventListener('pointerdown', e => {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (!gameActive) {
+                init();
+                return;
+            }
+            handlePointer(e);
+        });
+        window.addEventListener('pointermove', handlePointer);
+        window.addEventListener('pointerup', (e) => {
+            if (e.pointerType === 'touch') {
+                input.isUsingPointer = false;
+            }
+        });
+        window.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+        function gameOver() {
+            gameActive = false;
+            playDeathSound();
+
+            // Explosion
+            for (let i = 0; i < 50; i++) {
+                const ang = Math.random() * Math.PI * 2;
+                const spd = Math.random() * 200;
+                particles.push({
+                    x: serpent.headX,
+                    y: serpent.headY,
+                    vx: Math.cos(ang) * spd,
+                    vy: Math.sin(ang) * spd,
+                    type: 'explosion',
+                    life: 1.0,
+                    color: COLORS.serpent
+                });
+            }
+            screenShake = 1.0;
+
+            if (score > bestScore) {
+                bestScore = Math.floor(score);
+                localStorage.setItem('loop-serpent-best', bestScore);
+            }
+            finalScoreEl.textContent = Math.floor(score);
+            finalBestEl.textContent = bestScore;
+            updateHUD();
+            gameOverEl.style.display = 'block';
+        }
+
+    </script>
+</body>
+</html>

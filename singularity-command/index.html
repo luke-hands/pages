@@ -83,7 +83,7 @@
             transform: translate(-50%, -50%);
             text-align: center;
             pointer-events: auto;
-            display: none;
+            display: block;
         }
 
         #overlay h1 {
@@ -95,8 +95,29 @@
 
         #overlay p {
             font-size: 4vmin;
+            line-height: 1.6;
             color: #fff;
             cursor: pointer;
+        }
+
+        @media (pointer: coarse) {
+            .top-bar {
+                font-size: 5vmin;
+                padding: 1vmin;
+            }
+
+            #energy-container {
+                height: 2vmin;
+                bottom: 12vw;
+            }
+
+            #overlay h1 {
+                font-size: 8vmin;
+            }
+
+            #overlay p {
+                font-size: 5vmin;
+            }
         }
     </style>
 </head>
@@ -111,8 +132,13 @@
             <div id="energy-bar"></div>
         </div>
         <div id="overlay">
-            <h1 id="overlay-title">GAME OVER</h1>
-            <p id="overlay-msg">TAP TO RESTART</p>
+            <h1 id="overlay-title">SINGULARITY COMMAND</h1>
+            <p id="overlay-msg">
+                DEFEND THE CITIES<br>
+                HOLD TO ATTRACT MISSILES<br>
+                ENERGY DRAINS WHILE ACTIVE<br><br>
+                TAP TO START
+            </p>
         </div>
     </div>
 
@@ -139,6 +165,7 @@
             energy: 1.0,
             isGameOver: false,
             isPaused: false,
+            isStarted: false,
             lastTime: 0,
             shake: 0,
             timeScale: 1.0,
@@ -496,6 +523,7 @@
         }
 
         function checkWaveProgress(dt) {
+            if (!state.isStarted) return;
             if (state.waveMissilesRemaining > 0) {
                 state.spawnTimer -= dt;
                 if (state.spawnTimer <= 0) {
@@ -535,6 +563,8 @@
         function checkGameOver() {
             if (state.cities.every(c => !c.alive)) {
                 state.isGameOver = true;
+                document.getElementById('overlay-title').textContent = 'GAME OVER';
+                document.getElementById('overlay-msg').innerHTML = 'TAP TO RESTART';
                 document.getElementById('overlay').style.display = 'block';
             }
         }
@@ -756,8 +786,18 @@
         }
 
         // Controls
-        function handleStart(x, y) {
+        function handleStart(x, y, pointerType) {
             initAudio();
+
+            let targetY = y;
+            if (pointerType === 'touch') {
+                targetY -= Math.min(state.vw, state.vh) * 0.12;
+            }
+
+            if (!state.isStarted) {
+                state.isStarted = true;
+                document.getElementById('overlay').style.display = 'none';
+            }
             if (state.isGameOver) {
                 restart();
                 return;
@@ -765,7 +805,7 @@
             if (state.energy > 0.1) {
                 state.well = {
                     x: x,
-                    y: y,
+                    y: targetY,
                     coreRadius: state.vw * 0.025,
                     influenceRadius: state.vw * 0.22,
                     rotation: 0,
@@ -774,10 +814,14 @@
             }
         }
 
-        function handleMove(x, y) {
+        function handleMove(x, y, pointerType) {
             if (state.well) {
+                let targetY = y;
+                if (pointerType === 'touch') {
+                    targetY -= Math.min(state.vw, state.vh) * 0.12;
+                }
                 state.well.x = x;
-                state.well.y = y;
+                state.well.y = targetY;
             }
         }
 
@@ -785,8 +829,8 @@
             state.well = null;
         }
 
-        window.addEventListener('pointerdown', e => handleStart(e.clientX, e.clientY));
-        window.addEventListener('pointermove', e => handleMove(e.clientX, e.clientY));
+        window.addEventListener('pointerdown', e => handleStart(e.clientX, e.clientY, e.pointerType));
+        window.addEventListener('pointermove', e => handleMove(e.clientX, e.clientY, e.pointerType));
         window.addEventListener('pointerup', handleEnd);
         window.addEventListener('pointercancel', handleEnd);
 
@@ -801,6 +845,7 @@
 
         function restart() {
             state.isGameOver = false;
+            state.isStarted = true;
             state.score = 0;
             state.wave = 1;
             state.energy = 1.0;

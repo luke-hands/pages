@@ -48,17 +48,25 @@
   }
   #restart-prompt {
     position: absolute;
-    top: 60%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     text-align: center;
     opacity: 0;
-    display: none;
-    transition: opacity 0.5s;
+    visibility: hidden;
+    transition: opacity 0.5s, visibility 0.5s;
+    background: rgba(7, 8, 15, 0.4);
+    pointer-events: auto;
+    z-index: 15;
   }
   #restart-prompt.visible {
     opacity: 1;
-    display: block;
+    visibility: visible;
   }
   .multiplier-display {
     position: absolute;
@@ -86,6 +94,81 @@
     background: var(--cyan);
     box-shadow: 0 0 10px var(--cyan);
   }
+
+  /* Start Screen Styles */
+  #start-screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    background: rgba(7, 8, 15, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 20;
+    transition: opacity 0.5s, visibility 0.5s;
+  }
+  #start-screen.hidden {
+    opacity: 0;
+    visibility: hidden;
+  }
+  .title {
+    font-size: clamp(2.5rem, 10vw, 4rem);
+    font-weight: 900;
+    color: var(--cyan);
+    text-shadow: 0 0 20px var(--cyan);
+    margin-bottom: 2rem;
+    letter-spacing: 0.1em;
+  }
+  .instructions {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .instruction-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 1.2rem;
+    font-weight: bold;
+  }
+  .action {
+    background: var(--pink);
+    color: white;
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+    min-width: 100px;
+    text-align: center;
+    box-shadow: 0 0 15px var(--pink);
+  }
+  .desc {
+    color: var(--violet);
+  }
+  .goal {
+    font-size: 0.9rem;
+    color: white;
+    opacity: 0.8;
+    margin-bottom: 3rem;
+    letter-spacing: 0.05em;
+  }
+  #start-prompt {
+    font-size: 1.5rem;
+    color: var(--cyan);
+    font-weight: bold;
+  }
+  .pulse {
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.95); }
+    100% { opacity: 1; transform: scale(1); }
+  }
 </style>
 </head>
 <body>
@@ -101,8 +184,23 @@
     </div>
   </div>
   <div id="restart-prompt">
-    <div style="font-size: 1.5rem; margin-bottom: 10px;">SHATTERED</div>
-    <div style="color: var(--cyan);">Tap or Space to Restart</div>
+    <div style="font-size: 3rem; font-weight: 900; color: var(--pink); text-shadow: 0 0 20px var(--pink); margin-bottom: 1rem;">SHATTERED</div>
+    <div id="restart-text" style="color: var(--cyan); font-weight: bold; font-size: 1.2rem;" class="pulse">Tap or Space to Restart</div>
+  </div>
+  <div id="start-screen">
+    <h1 class="title">COMET GRAZE</h1>
+    <div class="instructions">
+      <div class="instruction-row">
+        <span class="action" id="action-text">HOLD</span>
+        <span class="desc">TO DIVE</span>
+      </div>
+      <div class="instruction-row">
+        <span class="action">RELEASE</span>
+        <span class="desc">TO CLIMB</span>
+      </div>
+    </div>
+    <div class="goal">GRAZE EDGES TO MULTIPLY</div>
+    <div id="start-prompt" class="pulse">Tap or Space to Start</div>
   </div>
 </div>
 <canvas id="gameCanvas"></canvas>
@@ -196,10 +294,19 @@
   window.addEventListener('resize', resize);
   resize();
 
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  if (isTouch) {
+    document.getElementById('action-text').textContent = 'HOLD';
+    document.getElementById('start-prompt').textContent = 'Tap to Start';
+    document.getElementById('restart-text').textContent = 'Tap to Restart';
+  }
+
   function handleDown(e) {
     if (e) e.preventDefault();
     initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-    if (!gameActive && !paused) {
+    if (!gameActive && !paused && !gameOver) {
+        startGame();
+    } else if (gameOver && !dieTimeout) {
         startGame();
     }
     isPressing = true;
@@ -226,14 +333,15 @@
 
     const prompt = document.getElementById('restart-prompt');
     prompt.classList.remove('visible');
-    prompt.style.display = 'none';
+
+    const startScreen = document.getElementById('start-screen');
+    startScreen.classList.add('hidden');
 
     updateUI();
     requestAnimationFrame(loop);
   }
 
   function loop(t) {
-    if (!gameActive && !gameOver && !paused) return;
     let dt = Math.min((t - lastTime) / 1000, 0.1);
     lastTime = t;
     if (paused) { requestAnimationFrame(loop); return; }
@@ -249,11 +357,14 @@
     }
     update(dt);
     draw();
-    if (gameActive || gameOver || paused) requestAnimationFrame(loop);
+    requestAnimationFrame(loop);
   }
 
   function update(dt) {
-    if (!gameActive) return;
+    if (!gameActive) {
+      scrollX += scrollSpeed * dt;
+      return;
+    }
     const elapsed = (performance.now() - runStartTime) / 1000;
     scrollSpeed = 0.45 * Math.pow(1.015, Math.floor(elapsed / 5));
     scrollSpeed = Math.min(scrollSpeed, 0.85);
@@ -323,8 +434,6 @@
     }
     dieTimeout = setTimeout(() => {
         const prompt = document.getElementById('restart-prompt');
-        prompt.style.display = 'block';
-        prompt.offsetHeight;
         prompt.classList.add('visible');
         dieTimeout = null;
     }, 600);
@@ -355,7 +464,7 @@
         if (particles.active[i]) { ctx.globalAlpha = particles.life[i]; ctx.fillRect(particles.x[i] * width, particles.y[i] * height, 2, 2); }
     }
     ctx.globalAlpha = 1.0;
-    if (gameActive) {
+    if (gameActive || (!gameOver && !gameActive)) {
         ctx.fillStyle = '#ff6ec7'; ctx.shadowBlur = 15; ctx.shadowColor = '#ff6ec7';
         ctx.beginPath(); ctx.arc(width * PLAYER_X_PCT, height * player.y, height * player.radius, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0;
@@ -400,7 +509,10 @@
       if (document.hidden) { paused = true; }
       else { paused = false; lastTime = performance.now(); }
   });
-  draw();
+
+  initCave();
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
 </script>
 </body>
 </html>

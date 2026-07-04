@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Comet Graze</title>
+<style>
+  :root {
+    --bg: #07080f;
+    --violet: #7c6cff;
+    --cyan: #46c8ff;
+    --pink: #ff6ec7;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body, html {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--bg);
+    touch-action: none;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+  #ui {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    color: white;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    z-index: 10;
+  }
+  .score-container {
+    display: flex;
+    justify-content: space-between;
+    font-size: 1.2rem;
+    font-weight: bold;
+    text-shadow: 0 0 10px rgba(70, 200, 255, 0.5);
+  }
+  #restart-prompt {
+    position: absolute;
+    top: 60%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    opacity: 0;
+    display: none;
+    transition: opacity 0.5s;
+  }
+  #restart-prompt.visible {
+    opacity: 1;
+    display: block;
+  }
+  .multiplier-display {
+    position: absolute;
+    left: 28%;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+  }
+  #multiplier-text {
+    font-size: 2rem;
+    font-weight: 900;
+    font-style: italic;
+  }
+  #meter-container {
+    width: 60px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.2);
+    margin-top: 4px;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  #meter-fill {
+    width: 0%;
+    height: 100%;
+    background: var(--cyan);
+    box-shadow: 0 0 10px var(--cyan);
+  }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div class="score-container">
+    <div id="current-score">Score: 0</div>
+    <div id="best-score">Best: 0</div>
+  </div>
+  <div class="multiplier-display" id="multiplier-ui">
+    <div id="multiplier-text">1x</div>
+    <div id="meter-container">
+      <div id="meter-fill"></div>
+    </div>
+  </div>
+  <div id="restart-prompt">
+    <div style="font-size: 1.5rem; margin-bottom: 10px;">SHATTERED</div>
+    <div style="color: var(--cyan);">Tap or Space to Restart</div>
+  </div>
+</div>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const PLAYER_X_PCT = 0.28;
+  const DIVE_ACCEL = 1.7;
+  const CLIMB_ACCEL = -1.3;
+  const MAX_SPEED = 0.55;
+  const GRAZE_BAND = 0.035;
+  const MULTIPLIERS = [1, 2, 4, 8, 16];
+  const MAX_PARTICLES = 100;
+  const MAX_TRAIL = 200;
+
+  let width, height, dpr;
+  let score = 0, bestScore = 0;
+  let gameActive = false, gameOver = false, paused = false;
+  let lastTime = 0, runStartTime = 0, hitStop = 0;
+  let isPressing = false;
+  let dieTimeout = null;
+
+  const player = {
+    y: 0.5, vy: 0, radius: 0.012,
+    multiplier: 1, multiplierIdx: 0,
+    grazeMeter: 0, safetyTimer: 0,
+  };
+
+  const trailX = new Float32Array(MAX_TRAIL);
+  const trailY = new Float32Array(MAX_TRAIL);
+  let trailIdx = 0, trailCount = 0;
+
+  const particles = {
+    x: new Float32Array(MAX_PARTICLES), y: new Float32Array(MAX_PARTICLES),
+    vx: new Float32Array(MAX_PARTICLES), vy: new Float32Array(MAX_PARTICLES),
+    life: new Float32Array(MAX_PARTICLES), active: new Uint8Array(MAX_PARTICLES),
+  };
+
+  const shatters = {
+    x: new Float32Array(MAX_PARTICLES), y: new Float32Array(MAX_PARTICLES),
+    vx: new Float32Array(MAX_PARTICLES), vy: new Float32Array(MAX_PARTICLES),
+    r: new Float32Array(MAX_PARTICLES), life: new Float32Array(MAX_PARTICLES), active: new Uint8Array(MAX_PARTICLES),
+  };
+
+  let scrollX = 0, scrollSpeed = 0.45, gapHeight = 0.34, caveParams = [];
+
+  let audioCtx;
+  function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  function playBleep(tier) {
+    if (!audioCtx || audioCtx.state === 'suspended') return;
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.type = 'sine'; osc.frequency.setValueAtTime(440 + tier * 110, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+  }
+
+  function initCave() {
+    caveParams = [
+      { amp: 0.08 + Math.random() * 0.04, freq: 0.4 + Math.random() * 0.2, phase: Math.random() * Math.PI * 2 },
+      { amp: 0.04 + Math.random() * 0.02, freq: 1.0 + Math.random() * 0.5, phase: Math.random() * Math.PI * 2 },
+      { amp: 0.01 + Math.random() * 0.01, freq: 2.5 + Math.random() * 1.0, phase: Math.random() * Math.PI * 2 }
+    ];
+    scrollX = 0; scrollSpeed = 0.45; gapHeight = 0.34;
+  }
+
+  function getCenterline(x) {
+    let y = 0.5;
+    for (let i = 0; i < caveParams.length; i++) {
+        const p = caveParams[i];
+        y += Math.sin(x * p.freq + p.phase) * p.amp;
+    }
+    return y;
+  }
+
+  try {
+    const saved = localStorage.getItem('comet-graze-best');
+    if (saved) bestScore = parseInt(saved, 10) || 0;
+    document.getElementById('best-score').textContent = `Best: ${bestScore}`;
+  } catch (e) {}
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    width = window.innerWidth; height = window.innerHeight;
+    canvas.width = width * dpr; canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function handleDown(e) {
+    if (e) e.preventDefault();
+    initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    if (!gameActive && !paused) {
+        startGame();
+    }
+    isPressing = true;
+  }
+  function handleUp(e) { if (e) e.preventDefault(); isPressing = false; }
+
+  window.addEventListener('keydown', (e) => { if (e.code === 'Space') handleDown(e); });
+  window.addEventListener('keyup', (e) => { if (e.code === 'Space') handleUp(e); });
+  window.addEventListener('mousedown', (e) => { if (e.button === 0) handleDown(e); });
+  window.addEventListener('mouseup', (e) => { if (e.button === 0) handleUp(e); });
+  canvas.addEventListener('touchstart', handleDown, {passive: false});
+  canvas.addEventListener('touchend', handleUp, {passive: false});
+  canvas.addEventListener('touchcancel', handleUp, {passive: false});
+
+  function startGame() {
+    if (dieTimeout) { clearTimeout(dieTimeout); dieTimeout = null; }
+    gameActive = true; gameOver = false; paused = false; score = 0;
+    player.y = 0.5; player.vy = 0; player.multiplier = 1; player.multiplierIdx = 0;
+    player.grazeMeter = 0; player.safetyTimer = 0;
+    trailCount = 0; trailIdx = 0;
+    particles.active.fill(0); shatters.active.fill(0);
+    initCave();
+    lastTime = performance.now(); runStartTime = lastTime;
+
+    const prompt = document.getElementById('restart-prompt');
+    prompt.classList.remove('visible');
+    prompt.style.display = 'none';
+
+    updateUI();
+    requestAnimationFrame(loop);
+  }
+
+  function loop(t) {
+    if (!gameActive && !gameOver && !paused) return;
+    let dt = Math.min((t - lastTime) / 1000, 0.1);
+    lastTime = t;
+    if (paused) { requestAnimationFrame(loop); return; }
+    if (hitStop > 0) { hitStop--; requestAnimationFrame(loop); return; }
+    if (gameOver) {
+        dt *= 0.25;
+        for (let i = 0; i < MAX_PARTICLES; i++) {
+            if (shatters.active[i]) {
+                shatters.x[i] += shatters.vx[i] * dt; shatters.y[i] += shatters.vy[i] * dt;
+                shatters.life[i] -= dt * 1.5; if (shatters.life[i] <= 0) shatters.active[i] = 0;
+            }
+        }
+    }
+    update(dt);
+    draw();
+    if (gameActive || gameOver || paused) requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    if (!gameActive) return;
+    const elapsed = (performance.now() - runStartTime) / 1000;
+    scrollSpeed = 0.45 * Math.pow(1.015, Math.floor(elapsed / 5));
+    scrollSpeed = Math.min(scrollSpeed, 0.85);
+    gapHeight = 0.34 - (0.34 - 0.17) * Math.min(elapsed / 90, 1);
+    scrollX += scrollSpeed * dt;
+    player.vy += (isPressing ? DIVE_ACCEL : CLIMB_ACCEL) * dt;
+    player.vy = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, player.vy));
+    player.y += player.vy * dt;
+    const cy = getCenterline(scrollX + PLAYER_X_PCT), tw = cy - gapHeight / 2, bw = cy + gapHeight / 2;
+    const isGrazing = Math.abs((player.y - player.radius) - tw) < GRAZE_BAND || Math.abs((player.y + player.radius) - bw) < GRAZE_BAND;
+    if (player.y - player.radius < tw || player.y + player.radius > bw) { die(); return; }
+    if (isGrazing) {
+        player.safetyTimer = 0; player.grazeMeter += dt;
+        if (player.grazeMeter >= 1.2) {
+            if (player.multiplierIdx < MULTIPLIERS.length - 1) {
+                player.multiplierIdx++; player.multiplier = MULTIPLIERS[player.multiplierIdx];
+                player.grazeMeter = 0; hitStop = 2; playBleep(player.multiplierIdx);
+            } else player.grazeMeter = 1.2;
+        }
+        if (Math.random() > 0.3) spawnParticle(PLAYER_X_PCT, (Math.abs((player.y - player.radius) - tw) < GRAZE_BAND ? tw : bw));
+    } else {
+        if (player.grazeMeter > 0) { player.grazeMeter = Math.max(0, player.grazeMeter - dt * 2); }
+        else if (player.multiplierIdx > 0) {
+            player.safetyTimer += dt;
+            if (player.safetyTimer >= 1.5) { player.multiplierIdx--; player.multiplier = MULTIPLIERS[player.multiplierIdx]; player.safetyTimer = 0; }
+        }
+    }
+    score += dt * 10 * player.multiplier;
+    trailX[trailIdx] = PLAYER_X_PCT; trailY[trailIdx] = player.y;
+    trailIdx = (trailIdx + 1) % MAX_TRAIL; trailCount = Math.min(trailCount + 1, 10 + player.multiplierIdx * 15);
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+        if (particles.active[i]) {
+            particles.x[i] += particles.vx[i] * dt; particles.y[i] += particles.vy[i] * dt;
+            particles.life[i] -= dt * 2; if (particles.life[i] <= 0) particles.active[i] = 0;
+        }
+    }
+    updateUI();
+  }
+
+  function spawnParticle(x, y) {
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+        if (!particles.active[i]) {
+            particles.x[i] = x; particles.y[i] = y;
+            particles.vx[i] = -scrollSpeed * 0.5 - Math.random() * 0.2;
+            particles.vy[i] = (Math.random() - 0.5) * 0.1;
+            particles.life[i] = 1.0; particles.active[i] = 1; return;
+        }
+    }
+  }
+
+  function updateUI() {
+    document.getElementById('current-score').textContent = `Score: ${Math.floor(score)}`;
+    document.getElementById('multiplier-text').textContent = `${player.multiplier}x`;
+    document.getElementById('meter-fill').style.width = `${(player.grazeMeter / 1.2) * 100}%`;
+    const colors = ['#7c6cff', '#46c8ff', '#46c8ff', '#ff6ec7', '#ffffff'];
+    document.getElementById('multiplier-text').style.color = colors[player.multiplierIdx];
+    document.getElementById('meter-fill').style.backgroundColor = colors[player.multiplierIdx];
+  }
+
+  function die() {
+    if (!gameActive) return;
+    gameActive = false; gameOver = true;
+    for (let i = 0; i < 40; i++) {
+        shatters.x[i] = PLAYER_X_PCT; shatters.y[i] = player.y;
+        shatters.vx[i] = (Math.random() - 0.5) * 0.6; shatters.vy[i] = (Math.random() - 0.5) * 0.6;
+        shatters.r[i] = Math.random() * 0.01 + 0.005; shatters.life[i] = 1.0; shatters.active[i] = 1;
+    }
+    dieTimeout = setTimeout(() => {
+        const prompt = document.getElementById('restart-prompt');
+        prompt.style.display = 'block';
+        prompt.offsetHeight;
+        prompt.classList.add('visible');
+        dieTimeout = null;
+    }, 600);
+    if (score > bestScore) {
+        bestScore = Math.floor(score); document.getElementById('best-score').textContent = `Best: ${bestScore}`;
+        try { localStorage.setItem('comet-graze-best', bestScore); } catch (e) {}
+    }
+  }
+
+  function draw() {
+    ctx.fillStyle = '#07080f'; ctx.fillRect(0, 0, width, height);
+    const pulse = 1 + 0.03 * Math.sin(((performance.now() - runStartTime) / 1000) * Math.PI * 4);
+    ctx.save(); if (gameOver) ctx.translate(Math.random() * 10 - 5, Math.random() * 10 - 5);
+    if (caveParams.length > 0) drawCave(pulse);
+    if (gameActive) {
+        const colors = ['#7c6cff', '#46c8ff', '#46c8ff', '#ff6ec7', '#ffffff'];
+        ctx.strokeStyle = colors[player.multiplierIdx]; ctx.lineWidth = height * player.radius * 1.5; ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (let i = 0; i < trailCount; i++) {
+            const idx = (trailIdx - trailCount + i + MAX_TRAIL) % MAX_TRAIL;
+            const tx = (trailX[idx] - (trailCount - i) * 0.004) * width;
+            if (i === 0) ctx.moveTo(tx, trailY[idx] * height); else ctx.lineTo(tx, trailY[idx] * height);
+        }
+        ctx.stroke();
+    }
+    ctx.fillStyle = '#46c8ff';
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+        if (particles.active[i]) { ctx.globalAlpha = particles.life[i]; ctx.fillRect(particles.x[i] * width, particles.y[i] * height, 2, 2); }
+    }
+    ctx.globalAlpha = 1.0;
+    if (gameActive) {
+        ctx.fillStyle = '#ff6ec7'; ctx.shadowBlur = 15; ctx.shadowColor = '#ff6ec7';
+        ctx.beginPath(); ctx.arc(width * PLAYER_X_PCT, height * player.y, height * player.radius, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+    } else if (gameOver) {
+        ctx.fillStyle = '#ff6ec7';
+        for (let i = 0; i < MAX_PARTICLES; i++) {
+            if (shatters.active[i]) { ctx.globalAlpha = shatters.life[i]; ctx.beginPath(); ctx.arc(shatters.x[i] * width, shatters.y[i] * height, shatters.r[i] * height, 0, Math.PI * 2); ctx.fill(); }
+        }
+        ctx.globalAlpha = 1.0;
+    }
+    ctx.restore();
+  }
+
+  function drawCave(pulse) {
+    const steps = 60, stepSize = 1.2 / steps;
+    ctx.strokeStyle = '#7c6cff'; ctx.lineWidth = 3 * pulse; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.shadowBlur = 10 * pulse; ctx.shadowColor = '#7c6cff';
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const x = i * stepSize, wy = (getCenterline(scrollX + x) - gapHeight / 2) * height;
+      if (i === 0) ctx.moveTo(x * width, wy); else ctx.lineTo(x * width, wy);
+    }
+    ctx.stroke();
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const x = i * stepSize, wy = (getCenterline(scrollX + x) + gapHeight / 2) * height;
+      if (i === 0) ctx.moveTo(x * width, wy); else ctx.lineTo(x * width, wy);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(124, 108, 255, 0.05)'; ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+        const x = i * stepSize; ctx.lineTo(x * width, (getCenterline(scrollX + x) - gapHeight / 2) * height);
+    }
+    for (let i = steps; i >= 0; i--) {
+        const x = i * stepSize; ctx.lineTo(x * width, (getCenterline(scrollX + x) + gapHeight / 2) * height);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { paused = true; }
+      else { paused = false; lastTime = performance.now(); }
+  });
+  draw();
+</script>
+</body>
+</html>

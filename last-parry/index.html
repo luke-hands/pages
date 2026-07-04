@@ -95,8 +95,50 @@
         }
 
         .hint {
+            color: #e8eaf2;
+            font-size: 1.2rem;
+            font-weight: 500;
+        }
+
+        .instructions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            text-align: left;
+            margin-top: 0.5rem;
+            max-width: 500px;
+        }
+
+        .instruction-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .instruction-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--violet);
+            font-weight: 700;
+        }
+
+        .instruction-text {
+            font-size: 0.85rem;
+            line-height: 1.4;
             color: #8a90a6;
-            font-size: 1.1rem;
+        }
+
+        .touch-only { display: none; }
+        .kbd-only { display: inline; }
+
+        @media (pointer: coarse) {
+            .touch-only { display: inline; }
+            .kbd-only { display: none; }
+            .instructions {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
         }
 
         .hidden {
@@ -116,7 +158,21 @@
 
     <div id="overlay">
         <h1 id="title">LAST PARRY</h1>
-        <p class="hint" id="hint">Tap or Space to Parry</p>
+        <p class="hint" id="hint">
+            <span class="touch-only">Tap anywhere</span>
+            <span class="kbd-only">Press Space</span>
+            to Parry
+        </p>
+        <div id="how-to" class="instructions">
+            <div class="instruction-item">
+                <div class="instruction-label">Defense</div>
+                <div class="instruction-text">Wait for pink enemies to dash. Parry as they enter your rings.</div>
+            </div>
+            <div class="instruction-item">
+                <div class="instruction-label">Perfect</div>
+                <div class="instruction-text">Time it perfectly to launch enemies back and chain huge combos.</div>
+            </div>
+        </div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -189,22 +245,25 @@
 
         function setGameState(newState) {
             gameState = newState;
-            if (gameState === STATE_START) {
+            if (gameState === STATE_START || gameState === STATE_GAMEOVER) {
                 overlayEl.classList.remove('hidden');
-                titleEl.textContent = 'LAST PARRY';
-                hintEl.textContent = 'Tap or Space to Parry';
-            } else if (gameState === STATE_PLAYING) {
-                overlayEl.classList.add('hidden');
-                resetGame();
-            } else if (gameState === STATE_GAMEOVER) {
-                overlayEl.classList.remove('hidden');
-                titleEl.textContent = 'GAME OVER';
-                hintEl.textContent = 'Tap or Space to Retry';
-                if (score > bestScore) {
+                titleEl.textContent = gameState === STATE_START ? 'LAST PARRY' : 'GAME OVER';
+
+                const action = gameState === STATE_START ? 'Parry' : 'Retry';
+                hintEl.innerHTML = `
+                    <span class="touch-only">Tap anywhere</span>
+                    <span class="kbd-only">Press Space</span>
+                    to ${action}
+                `;
+
+                if (gameState === STATE_GAMEOVER && score > bestScore) {
                     bestScore = score;
                     localStorage.setItem('last-parry-best', bestScore);
                     bestEl.textContent = `BEST: ${bestScore}`;
                 }
+            } else if (gameState === STATE_PLAYING) {
+                overlayEl.classList.add('hidden');
+                resetGame();
             }
         }
 
@@ -472,6 +531,7 @@
             spawnParticles(player.x, player.y, varColor('--cyan'));
             screenShake = 15;
             hitStopTimer = 300;
+            if (navigator.vibrate) navigator.vibrate(200);
         }
 
         function applyChainSlowMo() {
@@ -532,11 +592,13 @@
                     spawnSlash(player.x, player.y);
                     playSound(multiplier);
                     applyChainSlowMo();
+                    if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
                 } else {
                     multiplier = 1;
                     score += 10;
                     screenShake = 3;
                     playSound(0);
+                    if (navigator.vibrate) navigator.vibrate(20);
                 }
             } else {
                 multiplier = 1;
@@ -600,14 +662,58 @@
 
                 // Draw Player (glowing diamond)
                 if (gameState === STATE_PLAYING) {
+                    const dashSpeed = (0.9 + Math.min(1, gameTime / 90000) * 0.7) * u / 1000;
+                    const rOuter = player.r + ENEMY_RADIUS * u + dashSpeed * PARRY_WINDOW_TOTAL;
+                    const rInner = player.r + ENEMY_RADIUS * u + dashSpeed * PARRY_WINDOW_PERFECT;
+
+                    // Draw Parry Rings
+                    ctx.save();
+                    ctx.setLineDash([5, 5]);
+                    ctx.lineWidth = 2;
+
+                    // Outer Ring
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, rOuter, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(124, 108, 255, 0.2)';
+                    ctx.stroke();
+
+                    // Inner Ring
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, rInner, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(70, 200, 255, 0.4)';
+                    ctx.setLineDash([]);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // Player Diamond
                     ctx.save();
                     ctx.translate(player.x, player.y);
                     ctx.rotate(Math.PI / 4);
+
+                    if (parryLockout > 0) {
+                        ctx.strokeStyle = varColor('--pink');
+                        ctx.shadowColor = varColor('--pink');
+                        ctx.globalAlpha = 0.5;
+                    } else {
+                        ctx.strokeStyle = varColor('--cyan');
+                        ctx.shadowColor = varColor('--cyan');
+                    }
+
                     ctx.shadowBlur = 15;
-                    ctx.shadowColor = varColor('--cyan');
-                    ctx.strokeStyle = varColor('--cyan');
                     ctx.lineWidth = 3;
                     ctx.strokeRect(-player.r / 1.4, -player.r / 1.4, player.r * 1.4, player.r * 1.4);
+
+                    // Lockout indicator
+                    if (parryLockout > 0) {
+                        ctx.restore();
+                        ctx.save();
+                        ctx.translate(player.x, player.y);
+                        ctx.beginPath();
+                        ctx.arc(0, 0, player.r * 1.8, -Math.PI/2, -Math.PI/2 + (parryLockout/250) * Math.PI * 2);
+                        ctx.strokeStyle = varColor('--pink');
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
                     ctx.restore();
                 }
 

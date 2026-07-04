@@ -39,9 +39,49 @@
             top: 20px;
             left: 20px;
             pointer-events: none;
-            display: flex;
+            display: none;
             flex-direction: column;
             gap: 4px;
+        }
+
+        #start-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(7, 8, 15, 0.8);
+            padding: 3rem;
+            border: 2px solid var(--serpent);
+            border-radius: 24px;
+            backdrop-filter: blur(12px);
+            z-index: 20;
+            width: 90%;
+            max-width: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            box-shadow: 0 0 40px rgba(124, 108, 255, 0.2);
+        }
+
+        #start-screen h1 {
+            font-size: 3.5rem;
+            color: var(--serpent);
+            text-shadow: 0 0 20px rgba(124, 108, 255, 0.5);
+            margin: 0;
+            line-height: 1;
+        }
+
+        .instructions {
+            color: #8a90a6;
+            font-size: 1.1rem;
+            line-height: 1.6;
+        }
+
+        #controls-hint {
+            font-size: 1rem;
+            color: var(--fg);
+            margin-top: 0.5rem;
         }
 
         .hud-item {
@@ -95,6 +135,15 @@
     </style>
 </head>
 <body>
+    <div id="start-screen">
+        <h1>LOOP SERPENT</h1>
+        <div class="instructions">
+            <p>Close loops with your trail to capture entities.</p>
+            <p>Avoid the walls and hunters.</p>
+        </div>
+        <div id="controls-hint" class="restart-hint">Tap Left/Right to Steer</div>
+    </div>
+
     <div id="hud">
         <div id="score-display" class="hud-item">0</div>
         <div id="multiplier-display" class="hud-item">×1</div>
@@ -105,6 +154,7 @@
         <h1>CRASHED</h1>
         <p>Score: <span id="final-score">0</span></p>
         <p>Best: <span id="final-best">0</span></p>
+        <div id="game-over-instructions" style="color: #8a90a6; margin-bottom: 1rem; font-size: 0.9rem;"></div>
         <div class="restart-hint">Tap or Press Space to Restart</div>
     </div>
 
@@ -116,6 +166,8 @@
         const scoreEl = document.getElementById('score-display');
         const multiEl = document.getElementById('multiplier-display');
         const bestEl = document.getElementById('best-display');
+        const startScreenEl = document.getElementById('start-screen');
+        const controlsHintEl = document.getElementById('controls-hint');
         const gameOverEl = document.getElementById('game-over');
         const finalScoreEl = document.getElementById('final-score');
         const finalBestEl = document.getElementById('final-best');
@@ -164,6 +216,26 @@
         // Audio State
         let audioCtx = null;
 
+        // Touch Control State
+        const activeTouches = new Map();
+        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+        function updateKeysFromTouches() {
+            input.keys.left = false;
+            input.keys.right = false;
+            for (const side of activeTouches.values()) {
+                if (side === 'left') input.keys.left = true;
+                if (side === 'right') input.keys.right = true;
+            }
+        }
+
+        function updateInstructions() {
+            const hint = isTouch ? "Tap Left/Right to Steer" : "Arrows or Click to Steer";
+            controlsHintEl.textContent = hint;
+            const goInstr = document.getElementById('game-over-instructions');
+            if (goInstr) goInstr.textContent = hint;
+        }
+
         function resize() {
             dpr = Math.min(window.devicePixelRatio || 1, 2);
             width = window.innerWidth;
@@ -176,6 +248,7 @@
 
         window.addEventListener('resize', resize);
         resize();
+        updateInstructions();
 
         // visibility change
         document.addEventListener('visibilitychange', () => {
@@ -256,6 +329,8 @@
             updateHUD();
 
             gameActive = true;
+            startScreenEl.style.display = 'none';
+            document.getElementById('hud').style.display = 'flex';
             gameOverEl.style.display = 'none';
             lastTime = performance.now();
             requestAnimationFrame(loop);
@@ -271,7 +346,8 @@
 
             // Handle Steering
             let desiredTurn = 0;
-            if (input.keys.left) desiredTurn = -serpent.turnRate;
+            if (input.keys.left && input.keys.right) desiredTurn = 0;
+            else if (input.keys.left) desiredTurn = -serpent.turnRate;
             else if (input.keys.right) desiredTurn = serpent.turnRate;
             else if (input.isUsingPointer) {
                 let diff = input.targetAngle - serpent.angle;
@@ -729,18 +805,59 @@
                 init();
                 return;
             }
-            handlePointer(e);
-        });
-        window.addEventListener('pointermove', handlePointer);
-        window.addEventListener('pointerup', (e) => {
             if (e.pointerType === 'touch') {
+                const side = e.clientX < width / 2 ? 'left' : 'right';
+                activeTouches.set(e.pointerId, side);
+                updateKeysFromTouches();
+            } else {
+                handlePointer(e);
+            }
+        });
+        window.addEventListener('pointermove', e => {
+            if (e.pointerType === 'touch') {
+                if (activeTouches.has(e.pointerId)) {
+                    const side = e.clientX < width / 2 ? 'left' : 'right';
+                    activeTouches.set(e.pointerId, side);
+                    updateKeysFromTouches();
+                }
+            } else {
+                handlePointer(e);
+            }
+        });
+        window.addEventListener('pointerup', e => {
+            if (e.pointerType === 'touch') {
+                activeTouches.delete(e.pointerId);
+                updateKeysFromTouches();
+                if (activeTouches.size === 0) input.isUsingPointer = false;
+            } else {
                 input.isUsingPointer = false;
+            }
+        });
+        window.addEventListener('pointercancel', e => {
+            if (e.pointerType === 'touch') {
+                activeTouches.delete(e.pointerId);
+                updateKeysFromTouches();
             }
         });
         window.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 
+        // Setup initial background state
+        function setup() {
+            serpent.speed = 0.28 * minDim;
+            serpent.maxLength = 1.4 * minDim;
+            serpent.pointSpacing = 0.005 * minDim;
+            serpent.headX = width / 2;
+            serpent.headY = height / 2;
+            serpent.angle = -Math.PI / 2;
+            serpent.trail = [{x: serpent.headX, y: serpent.headY}];
+            for (let i = 0; i < 8; i++) spawnPrey();
+            draw();
+        }
+        setup();
+
         function gameOver() {
             gameActive = false;
+            document.getElementById('hud').style.display = 'none';
             playDeathSound();
 
             // Explosion

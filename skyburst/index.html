@@ -101,6 +101,7 @@
     <div id="overlay">
         <div id="msg">
             SKYBURST<br>
+            <span style="font-size: 14px; font-weight: normal; color: var(--accent-cyan); display: block; margin: 10px 0;">STEAL SHELLS TO CLIMB. AVOID THE BURSTS.</span>
             <span style="font-size: 16px; font-weight: normal; color: #8a90a6;">tap or press any key to start</span>
         </div>
     </div>
@@ -419,21 +420,25 @@
         window.addEventListener('keydown', e => keys[e.code] = true);
         window.addEventListener('keyup', e => keys[e.code] = false);
 
+        const TOUCH_OFFSET = 60;
         let touchStartX = 0;
         let touchStartY = 0;
         let cometStartX = 0;
         let cometStartY = 0;
+        let isTouchOffsetApplied = false;
 
         window.addEventListener('pointermove', e => {
             if (e.pointerType === 'mouse') {
                 comet.targetX = e.clientX;
                 comet.targetY = e.clientY;
+                isTouchOffsetApplied = false;
             } else {
                 // Touch relative movement
-                const dx = (e.clientX - touchStartX) * 1.2;
-                const dy = (e.clientY - touchStartY) * 1.2;
+                const dx = (e.clientX - touchStartX) * 1.5;
+                const dy = (e.clientY - touchStartY) * 1.5;
                 comet.targetX = cometStartX + dx;
-                comet.targetY = cometStartY + dy;
+                comet.targetY = cometStartY + dy - TOUCH_OFFSET;
+                isTouchOffsetApplied = true;
             }
         });
 
@@ -441,10 +446,22 @@
             if (e.pointerType !== 'mouse') {
                 touchStartX = e.clientX;
                 touchStartY = e.clientY;
+
+                if (!gameActive) {
+                    start();
+                    isTouchOffsetApplied = false;
+                }
+
                 cometStartX = comet.targetX;
-                cometStartY = comet.targetY;
+                cometStartY = comet.targetY + (isTouchOffsetApplied ? TOUCH_OFFSET : 0);
+
+                // Immediate jump for better responsiveness
+                comet.targetY = cometStartY - TOUCH_OFFSET;
+                isTouchOffsetApplied = true;
+            } else {
+                start();
+                isTouchOffsetApplied = false;
             }
-            start();
         });
 
         // Prevent scrolling on touch
@@ -593,7 +610,9 @@
                 } catch (e) {}
             }
 
-            msgEl.innerHTML = `ALTITUDE <span class="highlight">${Math.floor(altitude)}m</span><br>BEST ${bestAltitude}m<br><span style="font-size: 16px; font-weight: normal; color: #8a90a6;">tap or press any key to try again</span>`;
+            msgEl.innerHTML = `ALTITUDE <span class="highlight">${Math.floor(altitude)}m</span><br>BEST ${bestAltitude}m<br>
+            <span style="font-size: 14px; font-weight: normal; color: var(--accent-cyan); display: block; margin: 10px 0;">STEAL SHELLS TO CLIMB. AVOID THE BURSTS.</span>
+            <span style="font-size: 16px; font-weight: normal; color: #8a90a6;">tap or press any key to try again</span>`;
 
             // Short delay before allowing restart to prevent accidental double-tap
             setTimeout(() => {
@@ -658,7 +677,6 @@
         }
 
         window.addEventListener('keydown', start);
-        window.addEventListener('pointerdown', start);
 
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {

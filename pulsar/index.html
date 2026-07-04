@@ -31,6 +31,31 @@
             touch-action: none;
         }
 
+        #left-glow, #right-glow {
+            position: absolute;
+            top: 0;
+            width: 50%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 1;
+        }
+
+        #left-glow {
+            left: 0;
+            background: linear-gradient(to right, rgba(70, 200, 255, 0.15), transparent);
+        }
+
+        #right-glow {
+            right: 0;
+            background: linear-gradient(to left, rgba(70, 200, 255, 0.15), transparent);
+        }
+
+        .active-glow {
+            opacity: 1 !important;
+        }
+
         canvas {
             display: block;
             width: 100%;
@@ -83,21 +108,65 @@
         }
 
         #overlay h1 {
-            font-size: 4rem;
+            font-size: 5rem;
             margin-bottom: 0.5rem;
             color: var(--accent);
-            letter-spacing: 0.2rem;
+            letter-spacing: 0.5rem;
+            font-weight: 900;
+            text-shadow: 0 0 20px rgba(124, 108, 255, 0.4);
         }
 
-        #overlay .hint {
+        #controls-hint {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 2rem;
+            pointer-events: none;
+        }
+
+        .control-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(70, 200, 255, 0.2);
+            padding: 15px;
+            border-radius: 12px;
+            min-width: 140px;
+        }
+
+        .control-box .key {
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.4);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .control-box .action {
             font-size: 1.2rem;
             color: var(--player);
-            margin-bottom: 2rem;
+            font-weight: 600;
+            text-transform: lowercase;
+        }
+
+        .mobile-label { display: none; }
+        .desktop-label { display: block; }
+
+        @media (pointer: coarse) {
+            .mobile-label { display: block; }
+            .desktop-label { display: none; }
+
+            #overlay h1 {
+                font-size: 3.5rem;
+                letter-spacing: 0.3rem;
+            }
         }
 
         #overlay .final-score {
-            font-size: 2rem;
+            font-size: 2.5rem;
             margin-bottom: 1rem;
+            color: var(--bullet);
+            font-weight: 800;
         }
 
         #overlay .restart-msg {
@@ -131,6 +200,8 @@
     </style>
 </head>
 <body>
+    <div id="left-glow"></div>
+    <div id="right-glow"></div>
     <canvas id="gameCanvas"></canvas>
 
     <div id="ui">
@@ -141,7 +212,18 @@
 
         <div id="overlay">
             <h1 id="title">PULSAR</h1>
-            <p class="hint" id="hint">tap: reverse • hold: dive</p>
+            <div id="controls-hint">
+                <div class="control-box">
+                    <span class="key desktop-label">Space</span>
+                    <span class="key mobile-label">Left Tap</span>
+                    <span class="action">Reverse</span>
+                </div>
+                <div class="control-box">
+                    <span class="key desktop-label">Down Arrow</span>
+                    <span class="key mobile-label">Right Hold</span>
+                    <span class="action">Dive</span>
+                </div>
+            </div>
             <div id="game-over-info" class="hidden">
                 <p class="final-score">SCORE: <span id="final-score-val">0</span></p>
             </div>
@@ -158,7 +240,9 @@
         const bestScoreEl = document.getElementById('best-score');
         const overlay = document.getElementById('overlay');
         const titleEl = document.getElementById('title');
-        const hintEl = document.getElementById('hint');
+        const controlsHint = document.getElementById('controls-hint');
+        const leftGlow = document.getElementById('left-glow');
+        const rightGlow = document.getElementById('right-glow');
         const gameOverInfo = document.getElementById('game-over-info');
         const finalScoreVal = document.getElementById('final-score-val');
         const muteToggle = document.getElementById('mute-toggle');
@@ -314,11 +398,15 @@
         };
 
         // Game State
+        let initialBest = 0;
+        try { initialBest = parseInt(localStorage.getItem('pulsar-best')) || 0; }
+        catch (e) { console.warn("Storage access denied", e); }
+
         const state = {
             running: false,
             gameOver: false,
             score: 0,
-            bestScore: parseInt(localStorage.getItem('pulsar-best')) || 0,
+            bestScore: initialBest,
             muted: false,
             lastTime: 0,
             dt: 0,
@@ -363,9 +451,12 @@
             }
         }
 
+        let gameOverTimeout;
         function startGame() {
             initAudio();
             startDrone();
+
+            if (gameOverTimeout) clearTimeout(gameOverTimeout);
 
             state.running = true;
             state.gameOver = false;
@@ -386,7 +477,7 @@
 
             overlay.classList.add('hidden');
             gameOverInfo.classList.add('hidden');
-            hintEl.classList.remove('hidden');
+            controlsHint.classList.remove('hidden');
         }
 
         function endGame() {
@@ -397,18 +488,26 @@
             visuals.shake = 8;
             spawnDeathParticles();
 
-            if (state.score > state.bestScore) {
-                state.bestScore = Math.floor(state.score);
-                localStorage.setItem('pulsar-best', state.bestScore);
-                bestScoreEl.textContent = `BEST: ${state.bestScore}`;
-            }
+            try {
+                if (state.score > state.bestScore) {
+                    state.bestScore = Math.floor(state.score);
+                    localStorage.setItem('pulsar-best', state.bestScore);
+                    bestScoreEl.textContent = `BEST: ${state.bestScore}`;
+                }
+            } catch (e) { console.warn("Storage blocked", e); }
+
+            // Reset control states
+            state.isReverseActive = false;
+            state.isDiveActive = false;
+            leftGlow.classList.remove('active-glow');
+            rightGlow.classList.remove('active-glow');
 
             // Hit stop
-            setTimeout(() => {
+            gameOverTimeout = setTimeout(() => {
                 overlay.classList.remove('hidden');
                 gameOverInfo.classList.remove('hidden');
                 titleEl.textContent = 'GAME OVER';
-                hintEl.classList.add('hidden');
+                controlsHint.classList.add('hidden');
                 finalScoreVal.textContent = Math.floor(state.score);
             }, 80);
         }
@@ -559,7 +658,8 @@
                         vx: Math.cos(angle) * speed,
                         vy: Math.sin(angle) * speed,
                         r: 0.01 * minDim,
-                        type: 'normal'
+                        type: 'normal',
+                        missed: false
                     });
                 }
             } else if (data.type === 'shockwave') {
@@ -570,14 +670,16 @@
                     gapAngle: data.gapAngle,
                     gapSize: Math.PI / 3, // 60 degrees
                     type: 'shockwave',
-                    r: 0.005 * minDim // thickness
+                    r: 0.005 * minDim, // thickness
+                    missed: false
                 });
             } else if (data.type === 'flare') {
                 visuals.bullets.push({
                     x: width/2, y: height/2,
                     angle: data.angle,
                     life: 1.0,
-                    type: 'flare'
+                    type: 'flare',
+                    missed: false
                 });
             }
         }
@@ -627,52 +729,82 @@
         }
 
         // Interaction
-        let inputDownTime = 0;
-        let isInputActive = false;
+        const activePointers = new Map();
+        const keys = {};
+        state.isReverseActive = false;
+        state.isDiveActive = false;
 
-        function handleInputStart() {
-            if (state.gameOver || !state.running) {
-                if (state.gameOver || !state.running) startGame();
+        function updateControls() {
+            let reversePressed = keys['Space'];
+            let divePressed = keys['ArrowDown'] || keys['s'];
+
+            for (const p of activePointers.values()) {
+                if (p.x < window.innerWidth / 2) reversePressed = true;
+                else divePressed = true;
+            }
+
+            if (!state.running) {
+                if (reversePressed || divePressed) startGame();
                 return;
             }
 
-            inputDownTime = Date.now();
-            isInputActive = true;
-
-            // Reverse direction instantly
-            player.dir *= -1;
-            spawnReversalParticles();
-        }
-
-        function handleInputEnd() {
-            isInputActive = false;
-            player.isDiving = false;
-            player.targetRadius = 0.34;
-        }
-
-        function checkHold() {
-            if (isInputActive && !player.isDiving) {
-                if (Date.now() - inputDownTime >= 150) {
-                    player.isDiving = true;
-                    player.targetRadius = 0.20;
-                }
+            // Reverse logic (tap-like trigger)
+            if (reversePressed && !state.isReverseActive) {
+                player.dir *= -1;
+                spawnReversalParticles();
             }
+            state.isReverseActive = reversePressed;
+
+            // Dive logic (hold)
+            state.isDiveActive = divePressed;
+            player.isDiving = state.isDiveActive;
+            player.targetRadius = player.isDiving ? 0.20 : 0.34;
+
+            // Visual feedback
+            let leftActive = keys['Space'];
+            let rightActive = keys['ArrowDown'] || keys['s'];
+            for (const p of activePointers.values()) {
+                if (p.x < window.innerWidth / 2) leftActive = true;
+                else rightActive = true;
+            }
+
+            leftGlow.classList.toggle('active-glow', leftActive);
+            rightGlow.classList.toggle('active-glow', rightActive);
         }
 
         window.addEventListener('keydown', (e) => {
-            if (e.code === 'Space') {
-                if (!isInputActive) handleInputStart();
-                e.preventDefault();
+            if (e.code === 'Space' || e.code === 'ArrowDown' || e.key === 's') {
+                keys[e.code || e.key] = true;
+                updateControls();
+                if (e.code !== 'F12') e.preventDefault();
             }
         });
         window.addEventListener('keyup', (e) => {
-            if (e.code === 'Space') handleInputEnd();
+            if (e.code === 'Space' || e.code === 'ArrowDown' || e.key === 's') {
+                keys[e.code || e.key] = false;
+                updateControls();
+            }
         });
+
         window.addEventListener('pointerdown', (e) => {
             if (e.target === muteToggle) return;
-            handleInputStart();
+            activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            updateControls();
         });
-        window.addEventListener('pointerup', handleInputEnd);
+        window.addEventListener('pointermove', (e) => {
+            if (activePointers.has(e.pointerId)) {
+                activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                updateControls();
+            }
+        });
+        window.addEventListener('pointerup', (e) => {
+            activePointers.delete(e.pointerId);
+            updateControls();
+        });
+        window.addEventListener('pointercancel', (e) => {
+            activePointers.delete(e.pointerId);
+            updateControls();
+        });
 
         function spawnReversalParticles() {
             const pCount = 8;
@@ -759,8 +891,6 @@
                 }
             }
 
-            checkHold();
-
             const tempoScale = 1.0 + (rhythm.bpm - 100) / (180 - 100) * 0.7;
             const baseSpeed = player.isDiving ? 2.3 : 1.6;
             const angularSpeed = baseSpeed * tempoScale * player.dir;
@@ -804,7 +934,10 @@
                     const dy = b.y - py;
                     const dist = Math.sqrt(dx*dx + dy*dy);
                     if (dist < b.r + pr) endGame();
-                    if (dist < (b.r + pr) * 2.5) triggerNearMiss();
+                    if (!b.missed && dist < (b.r + pr) * 2.5) {
+                        triggerNearMiss();
+                        b.missed = true;
+                    }
 
                     if (Math.abs(b.x - width/2) > width || Math.abs(b.y - height/2) > height) {
                         visuals.bullets.splice(i, 1);

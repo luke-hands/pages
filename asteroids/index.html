@@ -101,13 +101,9 @@
 
         #mobile-controls {
             position: absolute;
-            bottom: 30px;
-            left: 0;
-            width: 100%;
+            bottom: 40px;
+            right: 40px;
             display: none;
-            justify-content: space-between;
-            padding: 0 30px;
-            box-sizing: border-box;
             pointer-events: none;
             user-select: none;
             z-index: 10;
@@ -115,49 +111,68 @@
 
         @media (pointer: coarse) {
             #mobile-controls {
-                display: flex;
+                display: block;
             }
         }
 
-        .control-group {
-            display: flex;
-            gap: 15px;
-            pointer-events: auto;
-            align-items: flex-end;
-        }
-
         .mobile-btn {
-            width: 70px;
-            height: 70px;
+            width: 120px;
+            height: 120px;
             border-radius: 50%;
-            background: rgba(124, 108, 255, 0.1) !important;
-            border: 2px solid var(--accent) !important;
+            background: rgba(255, 110, 199, 0.1) !important;
+            border: 3px solid #ff6ec7 !important;
             color: var(--fg);
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 0.9rem;
+            font-size: 1.2rem;
             touch-action: none;
             -webkit-tap-highlight-color: transparent;
             padding: 0 !important;
-            transition: opacity 0.1s;
+            transition: opacity 0.1s, transform 0.1s;
+            pointer-events: auto;
+            box-shadow: 0 0 20px rgba(255, 110, 199, 0.2);
         }
 
         .mobile-btn:active {
-            opacity: 0.6;
+            opacity: 0.8;
+            transform: scale(0.95);
         }
 
-        #fire-btn {
-            border-color: #ff6ec7 !important;
-            background: rgba(255, 110, 199, 0.1) !important;
-            width: 85px;
-            height: 85px;
+        #joystick-base {
+            position: absolute;
+            width: 130px;
+            height: 130px;
+            background: rgba(124, 108, 255, 0.2);
+            border: 2px solid var(--accent);
+            border-radius: 50%;
+            backdrop-filter: blur(4px);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            z-index: 20;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 20px rgba(124, 108, 255, 0.2);
+            transition: opacity 0.2s, visibility 0.2s;
         }
 
-        #thrust-btn {
-            width: 85px;
-            height: 85px;
+        #joystick-knob {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            background: rgba(124, 108, 255, 0.5);
+            border: 2px solid var(--accent);
+            border-radius: 50%;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px rgba(124, 108, 255, 0.3);
+            transition: left 0.15s ease-out, top 0.15s ease-out;
+        }
+
+        #joystick-knob.active {
+            transition: none;
         }
     </style>
 </head>
@@ -175,14 +190,11 @@
     <div id="controls-hint">Arrows to move/thrust • Space to fire</div>
 
     <div id="mobile-controls">
-        <div class="control-group">
-            <button id="left-btn" class="mobile-btn">L</button>
-            <button id="right-btn" class="mobile-btn">R</button>
-        </div>
-        <div class="control-group">
-            <button id="thrust-btn" class="mobile-btn">THRUST</button>
-            <button id="fire-btn" class="mobile-btn">FIRE</button>
-        </div>
+        <button id="fire-btn" class="mobile-btn">FIRE</button>
+    </div>
+
+    <div id="joystick-base">
+        <div id="joystick-knob"></div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -297,6 +309,7 @@
         // Touch handling
         function bindControl(btnId, keyCode) {
             const btn = document.getElementById(btnId);
+            if (!btn) return;
             const handleStart = (e) => {
                 e.preventDefault();
                 keys[keyCode] = true;
@@ -315,10 +328,103 @@
             btn.addEventListener('mouseleave', () => keys[keyCode] = false);
         }
 
-        bindControl('left-btn', 'ArrowLeft');
-        bindControl('right-btn', 'ArrowRight');
-        bindControl('thrust-btn', 'ArrowUp');
         bindControl('fire-btn', 'Space');
+
+        // Virtual Joystick
+        const joystickBase = document.getElementById('joystick-base');
+        const joystickKnob = document.getElementById('joystick-knob');
+        let joystickActive = false;
+        let joystickOrigin = { x: 0, y: 0 };
+        let joystickTouchId = null;
+        const JOYSTICK_RADIUS = 65;
+        const DEADZONE = 15;
+
+        window.addEventListener('touchstart', (e) => {
+            if (joystickActive) return;
+
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.clientX < window.innerWidth / 2) {
+                    joystickActive = true;
+                    joystickTouchId = touch.identifier;
+                    joystickOrigin = { x: touch.clientX, y: touch.clientY };
+
+                    joystickBase.style.left = `${touch.clientX}px`;
+                    joystickBase.style.top = `${touch.clientY}px`;
+                    joystickBase.style.opacity = '1';
+                    joystickBase.style.visibility = 'visible';
+                    joystickKnob.classList.add('active');
+                    joystickKnob.style.left = '50%';
+                    joystickKnob.style.top = '50%';
+                    break;
+                }
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (e) => {
+            if (!joystickActive) return;
+
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.identifier === joystickTouchId) {
+                    e.preventDefault();
+
+                    const dx = touch.clientX - joystickOrigin.x;
+                    const dy = touch.clientY - joystickOrigin.y;
+                    const dist = Math.hypot(dx, dy);
+                    const angle = Math.atan2(dy, dx);
+
+                    const moveDist = Math.min(dist, JOYSTICK_RADIUS);
+                    const knobX = moveDist * Math.cos(angle);
+                    const knobY = moveDist * Math.sin(angle);
+
+                    joystickKnob.style.left = `calc(50% + ${knobX}px)`;
+                    joystickKnob.style.top = `calc(50% + ${knobY}px)`;
+
+                    // Reset keys
+                    keys['ArrowLeft'] = false;
+                    keys['ArrowRight'] = false;
+                    keys['ArrowUp'] = false;
+
+                    // Horizontal - Rotation
+                    if (Math.abs(knobX) > DEADZONE) {
+                        if (knobX < 0) keys['ArrowLeft'] = true;
+                        else keys['ArrowRight'] = true;
+                    }
+
+                    // Vertical - Thrust (Pushing up)
+                    if (knobY < -DEADZONE) {
+                        keys['ArrowUp'] = true;
+                    }
+
+                    break;
+                }
+            }
+        }, { passive: false });
+
+        const endJoystick = (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.identifier === joystickTouchId) {
+                    joystickActive = false;
+                    joystickTouchId = null;
+
+                    joystickBase.style.opacity = '0';
+                    joystickBase.style.visibility = 'hidden';
+                    joystickKnob.classList.remove('active');
+                    joystickKnob.style.left = '50%';
+                    joystickKnob.style.top = '50%';
+
+                    keys['ArrowLeft'] = false;
+                    keys['ArrowRight'] = false;
+                    keys['ArrowUp'] = false;
+                    break;
+                }
+            }
+        };
+
+        window.addEventListener('touchend', endJoystick);
+        window.addEventListener('touchcancel', endJoystick);
 
         function destroyAsteroid(index) {
             let x = asteroids[index].x;

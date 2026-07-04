@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Scrawl</title>
+    <style>
+        :root {
+            --bg: #07080f;
+            --cyan: #46c8ff;
+            --pink: #ff6ec7;
+            --violet: #7c6cff;
+            --fg: #e8eaf2;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg);
+            color: var(--fg);
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            z-index: 10;
+        }
+
+        .stats-left, .stats-right {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .score-container {
+            font-size: 24px;
+            font-weight: 800;
+            text-shadow: 0 0 10px rgba(124, 108, 255, 0.5);
+        }
+
+        .best-score {
+            font-size: 14px;
+            color: #8a90a6;
+        }
+
+        .multiplier {
+            font-size: 18px;
+            color: var(--violet);
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .multiplier.visible { opacity: 1; }
+
+        .lives {
+            display: flex;
+            gap: 8px;
+            font-size: 20px;
+        }
+
+        #ink-meter-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        #ink-meter {
+            height: 100%;
+            width: 100%;
+            background: var(--violet);
+            box-shadow: 0 0 10px var(--violet);
+            transition: width 0.1s linear;
+        }
+
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(7, 8, 15, 0.9);
+            border: 2px solid var(--violet);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            display: none;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+            cursor: pointer;
+        }
+
+        #game-over h1 {
+            font-size: 48px;
+            margin-bottom: 10px;
+            color: var(--fg);
+            text-shadow: 0 0 20px var(--violet);
+        }
+
+        #game-over p {
+            font-size: 20px;
+            color: #8a90a6;
+            margin-bottom: 20px;
+        }
+
+        .final-stats {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 30px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * { animation: none !important; transition: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <div id="ink-meter-container">
+        <div id="ink-meter"></div>
+    </div>
+    <div id="ui">
+        <div class="stats-left">
+            <div class="score-container">SCORE: <span id="score">0</span></div>
+            <div class="best-score">BEST: <span id="best-score">0</span></div>
+            <div id="multiplier" class="multiplier">×1</div>
+        </div>
+        <div class="stats-right">
+            <div id="lives" class="lives"></div>
+        </div>
+    </div>
+
+    <div id="game-over">
+        <h1>GAME OVER</h1>
+        <div class="final-stats">
+            Score: <span id="final-score">0</span><br>
+            Best: <span id="final-best">0</span>
+        </div>
+        <p>Tap to restart</p>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const bestScoreEl = document.getElementById('best-score');
+        const multiplierEl = document.getElementById('multiplier');
+        const livesEl = document.getElementById('lives');
+        const inkMeter = document.getElementById('ink-meter');
+        const gameOverEl = document.getElementById('game-over');
+        const finalScoreEl = document.getElementById('final-score');
+        const finalBestEl = document.getElementById('final-best');
+
+        let width, height, dpr;
+        let score = 0, bestScore = 0, combo = 1, lives = 3;
+        let gameActive = true;
+        let lastTime = 0;
+        let spawnTimer = 0;
+        let spawnInterval = 2200;
+        let motes = [];
+        let strokes = [];
+        let basins = [];
+        let particles = [];
+        let inkAmount = 0;
+        let inkCapacity = 0;
+        let isDrawing = false;
+        let currentStroke = null;
+        let gameTime = 0;
+        let shake = 0;
+        let gridPulse = 0;
+        let audioCtx = null;
+
+        const COLORS = {
+            cyan: '#46c8ff',
+            pink: '#ff6ec7',
+            violet: '#7c6cff',
+            bg: '#07080f'
+        };
+
+        function init() {
+            bestScore = parseInt(localStorage.getItem('neonScrawlBest') || '0');
+            bestScoreEl.textContent = bestScore;
+            resize();
+            resetGame();
+            requestAnimationFrame(loop);
+        }
+
+        function resize() {
+            dpr = window.devicePixelRatio || 1;
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            ctx.scale(dpr, dpr);
+
+            const oldCap = inkCapacity;
+            inkCapacity = width * 2.0;
+            if (oldCap > 0) {
+                inkAmount = (inkAmount / oldCap) * inkCapacity;
+            } else {
+                inkAmount = inkCapacity;
+            }
+
+            // Re-init basins
+            const bw = width * 0.22;
+            const bh = height * 0.08;
+            const targetY = height - bh;
+            basins = [
+                { color: 'cyan', x: 0, y: targetY, targetY: targetY, w: bw, h: bh, level: 0 },
+                { color: 'pink', x: width - bw, y: targetY, targetY: targetY, w: bw, h: bh, level: 0 }
+            ];
+            if (score >= 150) {
+                basins.push({ color: 'violet', x: width / 2 - bw / 2, y: targetY, targetY: targetY, w: bw, h: bh, level: 0 });
+            }
+        }
+
+        function resetGame() {
+            score = 0;
+            combo = 1;
+            lives = 3;
+            motes = [];
+            strokes = [];
+            particles = [];
+            spawnInterval = 2200;
+            spawnTimer = 0;
+            gameTime = 0;
+            gameActive = true;
+            inkAmount = inkCapacity;
+            gameOverEl.style.display = 'none';
+            updateUI();
+
+            const bw = width * 0.22;
+            const bh = height * 0.08;
+            const targetY = height - bh;
+            basins = [
+                { color: 'cyan', x: 0, y: targetY, targetY: targetY, w: bw, h: bh, level: 0 },
+                { color: 'pink', x: width - bw, y: targetY, targetY: targetY, w: bw, h: bh, level: 0 }
+            ];
+        }
+
+        function updateUI() {
+            scoreEl.textContent = score;
+            multiplierEl.textContent = `×${combo}`;
+            multiplierEl.className = combo > 1 ? 'multiplier visible' : 'multiplier';
+
+            let livesStr = '';
+            for (let i = 0; i < 3; i++) {
+                livesStr += i < lives ? '●' : '○';
+            }
+            livesEl.innerHTML = livesStr;
+
+            inkMeter.style.width = (inkAmount / inkCapacity * 100) + '%';
+            inkMeter.style.background = inkAmount < inkCapacity * 0.1 ? '#ff4646' : COLORS.violet;
+
+            if (score >= 150 && basins.length < 3) {
+                const bw = width * 0.22;
+                const bh = height * 0.08;
+                const targetY = height - bh;
+                basins.push({
+                    color: 'violet',
+                    x: width / 2 - bw / 2,
+                    y: height + 10,
+                    targetY: targetY,
+                    w: bw, h: bh, level: 0
+                });
+            }
+        }
+
+        class Mote {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = 0;
+                this.color = color;
+                this.radius = Math.max(8, Math.min(width, height) * 0.014);
+                this.squash = 1;
+                this.stretch = 1;
+                this.squashTimer = 0;
+                this.impactNormal = { x: 0, y: 1 };
+            }
+
+            update(dt) {
+                const gravity = (0.35 + (0.35 * Math.min(gameTime / 90000, 1))) * height;
+                this.vy += gravity * dt;
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+
+                if (this.squashTimer > 0) {
+                    this.squashTimer -= dt * 1000;
+                    if (this.squashTimer <= 0) {
+                        this.squash = 1;
+                        this.stretch = 1;
+                    } else {
+                        const t = 1 - (this.squashTimer / 80);
+                        this.squash = 0.6 + 0.4 * t;
+                        this.stretch = 1.3 - 0.3 * t;
+                    }
+                }
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                const angle = Math.atan2(this.impactNormal.y, this.impactNormal.x);
+                ctx.rotate(angle);
+                ctx.scale(this.squash, this.stretch);
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = COLORS[this.color];
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = COLORS[this.color];
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function spawnMote() {
+            const types = ['cyan', 'pink'];
+            if (score >= 150) types.push('violet');
+            const color = types[Math.floor(Math.random() * types.length)];
+            motes.push(new Mote(Math.random() * width, -20, color));
+
+            spawnInterval = Math.max(650, spawnInterval * 0.98);
+            spawnTimer = spawnInterval;
+        }
+
+        function checkCollisions(dt) {
+            for (let i = motes.length - 1; i >= 0; i--) {
+                const m = motes[i];
+
+                // Mote vs Stroke collisions
+                for (const s of strokes) {
+                    if (s.age > 4000) continue;
+                    for (let j = 0; j < s.points.length - 1; j++) {
+                        const p1 = s.points[j];
+                        const p2 = s.points[j+1];
+
+                        const collision = circleSegmentCollision(m, p1, p2);
+                        if (collision) {
+                            const speed = Math.hypot(m.vx, m.vy);
+                            reflectMote(m, collision.normal);
+                            // Position correction
+                            m.x = collision.x + collision.normal.x * (m.radius + 1);
+                            m.y = collision.y + collision.normal.y * (m.radius + 1);
+
+                            createSparks(m.x, m.y, m.color);
+                            playBounceSound(speed);
+                            break;
+                        }
+                    }
+                }
+
+                // Basin collisions
+                let caught = false;
+                for (const b of basins) {
+                    if (m.x > b.x && m.x < b.x + b.w && m.y > b.y) {
+                        if (m.color === b.color) {
+                            score += 10 * combo;
+                            const oldCombo = combo;
+                            combo = Math.min(8, combo + 1);
+                            b.level = Math.min(1, b.level + 0.05);
+                            if (combo !== oldCombo && (combo === 4 || combo === 8)) {
+                                shake = 4;
+                                gridPulse = 1.0;
+                                setTimeout(() => shake = 0, 150);
+                            }
+                        } else {
+                            loseLife();
+                        }
+                        motes.splice(i, 1);
+                        caught = true;
+                        updateUI();
+                        break;
+                    }
+                }
+
+                if (!caught && m.y > height + m.radius) {
+                    loseLife();
+                    motes.splice(i, 1);
+                    updateUI();
+                }
+            }
+        }
+
+        function circleSegmentCollision(circle, p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq === 0) return null;
+
+            let t = ((circle.x - p1.x) * dx + (circle.y - p1.y) * dy) / lenSq;
+            t = Math.max(0, Math.min(1, t));
+
+            const closestX = p1.x + t * dx;
+            const closestY = p1.y + t * dy;
+
+            const distSq = (circle.x - closestX) ** 2 + (circle.y - closestY) ** 2;
+            if (distSq < circle.radius ** 2) {
+                const dist = Math.sqrt(distSq);
+                return {
+                    x: closestX,
+                    y: closestY,
+                    normal: {
+                        x: (circle.x - closestX) / dist,
+                        y: (circle.y - closestY) / dist
+                    }
+                };
+            }
+            return null;
+        }
+
+        function reflectMote(m, normal) {
+            const dot = m.vx * normal.x + m.vy * normal.y;
+
+            // Reflect: v' = v - 2(v.n)n
+            // Applied with restitution
+            const rx = m.vx - 2 * dot * normal.x;
+            const ry = m.vy - 2 * dot * normal.y;
+
+            // Separate into normal and tangential components
+            const vnX = dot * normal.x;
+            const vnY = dot * normal.y;
+            const vtX = m.vx - vnX;
+            const vtY = m.vy - vnY;
+
+            m.vx = vtX * 0.98 - vnX * 0.75;
+            m.vy = vtY * 0.98 - vnY * 0.75;
+
+            m.squashTimer = 80;
+            m.impactNormal = { ...normal };
+        }
+
+        function loseLife() {
+            lives--;
+            combo = 1;
+            shake = 10;
+            gameActive = false;
+            setTimeout(() => {
+                gameActive = lives > 0;
+                shake = 0;
+                if (lives <= 0) endGame();
+                updateUI();
+            }, 120);
+        }
+
+        function endGame() {
+            gameActive = false;
+            if (score > bestScore) {
+                bestScore = score;
+                localStorage.setItem('neonScrawlBest', bestScore);
+            }
+            finalScoreEl.textContent = score;
+            finalBestEl.textContent = bestScore;
+            gameOverEl.style.display = 'block';
+        }
+
+        function createSparks(x, y, color) {
+            const count = 6 + Math.random() * 5;
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1.0,
+                    color
+                });
+            }
+        }
+
+        function playBounceSound(speed) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            const freq = 200 + speed * 0.5;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(freq * 0.5, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        function loop(time) {
+            const dt = Math.min(time - lastTime, 100) / 1000;
+            lastTime = time;
+
+            if (gameActive) {
+                if (gridPulse > 0) gridPulse -= dt * 2;
+                gameTime += dt * 1000;
+                spawnTimer -= dt * 1000;
+                if (spawnTimer <= 0) spawnMote();
+
+                inkAmount = Math.min(inkCapacity, inkAmount + inkCapacity * 0.15 * dt);
+                updateUI();
+
+                // Substeps for physics
+                const substeps = 4;
+                const subDt = dt / substeps;
+                for (let s = 0; s < substeps; s++) {
+                    for (const m of motes) m.update(subDt);
+                    checkCollisions(subDt);
+                }
+
+                // Update basins
+                for (const b of basins) {
+                    if (b.y > b.targetY) {
+                        b.y -= height * 0.5 * dt;
+                        if (b.y < b.targetY) b.y = b.targetY;
+                    }
+                }
+
+                // Update strokes
+                for (let i = strokes.length - 1; i >= 0; i--) {
+                    strokes[i].age += dt * 1000;
+                    if (strokes[i].age > 4000) strokes.splice(i, 1);
+                }
+
+                // Update particles
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.life -= dt * 2;
+                    if (p.life <= 0) particles.splice(i, 1);
+                }
+            }
+
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        function draw() {
+            ctx.fillStyle = COLORS.bg;
+            ctx.fillRect(0, 0, width, height);
+
+            if (shake > 0) {
+                ctx.save();
+                ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+            }
+
+            drawGrid();
+            for (const b of basins) drawBasin(b);
+            for (const s of strokes) drawStroke(s);
+            for (const m of motes) m.draw();
+            drawParticles();
+
+            if (shake > 0) ctx.restore();
+        }
+
+        function drawGrid() {
+            const pulseColor = Math.floor(26 + 100 * Math.max(0, gridPulse));
+            ctx.strokeStyle = `rgb(${pulseColor}, ${pulseColor}, ${pulseColor + 20})`;
+            ctx.lineWidth = 1 + Math.max(0, gridPulse) * 2;
+            const size = 50;
+            ctx.beginPath();
+            for (let x = 0; x < width; x += size) {
+                ctx.moveTo(x, 0); ctx.lineTo(x, height);
+            }
+            for (let y = 0; y < height; y += size) {
+                ctx.moveTo(0, y); ctx.lineTo(width, y);
+            }
+            ctx.stroke();
+        }
+
+        function drawBasin(b) {
+            ctx.fillStyle = COLORS[b.color] + '33';
+            ctx.fillRect(b.x, b.y, b.w, b.h);
+
+            // Liquid
+            const liquidHeight = b.h * b.level;
+            ctx.fillStyle = COLORS[b.color];
+            ctx.save();
+            ctx.beginPath();
+            const time = Date.now() / 500;
+            ctx.moveTo(b.x, b.y + b.h);
+            for (let x = 0; x <= b.w; x += 5) {
+                const yOff = Math.sin(time + x * 0.05) * 3;
+                ctx.lineTo(b.x + x, b.y + b.h - liquidHeight + yOff);
+            }
+            ctx.lineTo(b.x + b.w, b.y + b.h);
+            ctx.fill();
+            ctx.restore();
+
+            ctx.strokeStyle = COLORS[b.color];
+            ctx.lineWidth = 2;
+            ctx.strokeRect(b.x, b.y, b.w, b.h);
+        }
+
+        function drawStroke(s) {
+            if (s.points.length < 2) return;
+            const remaining = 4000 - s.age;
+            let opacity = 1;
+            if (remaining < 1200) {
+                opacity = remaining / 1200;
+                if (Math.random() > opacity) return; // Flicker
+            }
+
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // Glow
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = COLORS.violet;
+            ctx.strokeStyle = COLORS.violet;
+            ctx.globalAlpha = opacity;
+            ctx.lineWidth = 4;
+
+            ctx.beginPath();
+            ctx.moveTo(s.points[0].x, s.points[0].y);
+            for (let i = 1; i < s.points.length; i++) {
+                ctx.lineTo(s.points[i].x, s.points[i].y);
+            }
+            ctx.stroke();
+
+            // Core
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawParticles() {
+            for (const p of particles) {
+                ctx.fillStyle = COLORS[p.color];
+                ctx.globalAlpha = p.life;
+                ctx.fillRect(p.x, p.y, 2, 2);
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        // Pointer Events
+        window.addEventListener('pointerdown', e => {
+            if (!gameActive) return;
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (inkAmount < inkCapacity * 0.1) return;
+
+            isDrawing = true;
+            const x = e.clientX;
+            const y = e.clientY - (e.pointerType === 'touch' ? 60 : 0);
+            currentStroke = { points: [{x, y}], age: 0 };
+            strokes.push(currentStroke);
+            if (e.pointerType === 'touch') e.preventDefault();
+        });
+
+        window.addEventListener('pointermove', e => {
+            if (e.pointerType === 'touch') e.preventDefault();
+            if (!isDrawing || !currentStroke) return;
+
+            const x = e.clientX;
+            const y = e.clientY - (e.pointerType === 'touch' ? 60 : 0);
+            const lastPoint = currentStroke.points[currentStroke.points.length - 1];
+            const dist = Math.hypot(x - lastPoint.x, y - lastPoint.y);
+
+            if (dist > 6) {
+                if (inkAmount > dist) {
+                    inkAmount -= dist;
+                    currentStroke.points.push({x, y});
+                } else {
+                    isDrawing = false;
+                    currentStroke = null;
+                }
+            }
+        });
+
+        window.addEventListener('pointerup', () => {
+            isDrawing = false;
+            currentStroke = null;
+        });
+
+        window.addEventListener('keydown', e => {
+            if (e.key.toLowerCase() === 'r') resetGame();
+        });
+
+        gameOverEl.addEventListener('click', resetGame);
+        window.addEventListener('touchstart', e => {
+            if (e.touches.length >= 2) resetGame();
+        });
+
+        window.addEventListener('resize', resize);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) gameActive = false;
+            else if (lives > 0) gameActive = true;
+        });
+
+        init();
+    </script>
+</body>
+</html>

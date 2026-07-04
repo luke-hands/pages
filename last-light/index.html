@@ -98,6 +98,14 @@
             position: absolute;
             bottom: 2rem;
         }
+
+        .desktop-only { display: block; }
+        .mobile-only { display: none; }
+
+        @media (pointer: coarse) {
+            .desktop-only { display: none; }
+            .mobile-only { display: block; }
+        }
     </style>
 </head>
 <body>
@@ -109,18 +117,31 @@
         </div>
     </div>
     <div id="start-screen" class="overlay">
+        <h1>Last Light</h1>
         <p>Sweep the light. Burn the shadows.</p>
-        <div class="hint">Tap or press Space to start</div>
+        <div style="font-size: 0.9rem; margin-bottom: 2rem; opacity: 0.8; text-align: center;">
+            Moths are fast • Skitters dodge • Splitters multiply • Tanks are tough
+        </div>
+        <div class="hint">
+            <span class="desktop-only">Move Mouse to aim • AD or Arrows to rotate • P to pause • Space to start</span>
+            <span class="mobile-only">Drag to aim • Tap to start</span>
+        </div>
     </div>
     <div id="death-screen" class="overlay hidden">
         <h1>The light went out</h1>
         <p id="final-score-text">Score: 0</p>
         <p id="final-best-text" style="font-size: 1rem; opacity: 0.6; margin-top: -1.5rem;">Best: 0</p>
-        <div class="hint">Tap or press Space to relight</div>
+        <div class="hint">
+            <span class="desktop-only">Press Space to relight</span>
+            <span class="mobile-only">Tap to relight</span>
+        </div>
     </div>
     <div id="pause-screen" class="overlay hidden">
         <h1>Paused</h1>
-        <div class="hint">Tap or press any key to resume</div>
+        <div class="hint">
+            <span class="desktop-only">Press any key to resume</span>
+            <span class="mobile-only">Tap to resume</span>
+        </div>
     </div>
 
     <script>
@@ -226,18 +247,19 @@
             initAudio();
             if (e.touches.length > 0) {
                 const t = e.touches[0];
-                updateTargetAngle(t.clientX, t.clientY);
+                updateTargetAngle(t.clientX, t.clientY, true);
                 handleAction();
                 if (paused) togglePause();
             }
         }, { passive: false });
         canvas.addEventListener('touchmove', e => {
             e.preventDefault();
-            if (e.touches.length > 0) { updateTargetAngle(e.touches[0].clientX, e.touches[0].clientY); }
+            if (e.touches.length > 0) { updateTargetAngle(e.touches[0].clientX, e.touches[0].clientY, true); }
         }, { passive: false });
 
-        function updateTargetAngle(x, y) {
-            const dx = x - width / 2, dy = y - height / 2;
+        function updateTargetAngle(x, y, isTouch = false) {
+            const offsetY = isTouch ? -12 * u : 0;
+            const dx = x - width / 2, dy = (y + offsetY) - height / 2;
             STATE.targetAngle = Math.atan2(dy, dx);
         }
 

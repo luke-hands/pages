@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Last Parry</title>
+    <style>
+        :root {
+            --bg: #07080f;
+            --violet: #7c6cff;
+            --cyan: #46c8ff;
+            --pink: #ff6ec7;
+            --fg: #e8eaf2;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg);
+            color: var(--fg);
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .stats {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        #score {
+            font-size: 32px;
+            font-weight: 800;
+            text-shadow: 0 0 10px var(--cyan);
+        }
+
+        #multiplier {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--pink);
+            text-shadow: 0 0 5px var(--pink);
+        }
+
+        #best {
+            font-size: 14px;
+            color: #8a90a6;
+            text-align: right;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(7, 8, 15, 0.8);
+            padding: 2.5rem;
+            border-radius: 20px;
+            border: 1px solid rgba(124, 108, 255, 0.3);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            transition: opacity 0.3s;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 3.5rem;
+            font-weight: 900;
+            letter-spacing: -2px;
+            background: linear-gradient(to bottom, #fff, var(--violet));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hint {
+            color: #8a90a6;
+            font-size: 1.1rem;
+        }
+
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stats">
+            <div id="score">0</div>
+            <div id="multiplier">×1</div>
+        </div>
+        <div id="best">BEST: 0</div>
+    </div>
+
+    <div id="overlay">
+        <h1 id="title">LAST PARRY</h1>
+        <p class="hint" id="hint">Tap or Space to Parry</p>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // Initial setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const multEl = document.getElementById('multiplier');
+        const bestEl = document.getElementById('best');
+        const overlayEl = document.getElementById('overlay');
+        const titleEl = document.getElementById('title');
+        const hintEl = document.getElementById('hint');
+
+        let width, height, dpr, u;
+
+        function resize() {
+            dpr = Math.min(window.devicePixelRatio || 1, 2);
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            u = Math.min(width, height);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Game Constants
+        const STATE_START = 'START';
+        const STATE_PLAYING = 'PLAYING';
+        const STATE_GAMEOVER = 'GAMEOVER';
+
+        // Game State
+        let gameState = STATE_START;
+        let score = 0;
+        let multiplier = 1;
+        let bestScore = parseInt(localStorage.getItem('last-parry-best')) || 0;
+        let lastTime = 0;
+        let dt = 0;
+        let timeScale = 1;
+        let targetTimeScale = 1;
+        let slowMoTimer = 0;
+        let hitStopTimer = 0;
+        let screenShake = 0;
+        let parryLockout = 0;
+
+        // Gameplay Constants
+        const PLAYER_RADIUS = 0.035;
+        const ENEMY_RADIUS = 0.028;
+        const SPAWN_DIST = 0.6;
+        const PARRY_WINDOW_TOTAL = 200;
+        const PARRY_WINDOW_PERFECT = 80;
+
+        // Entities
+        let enemies = [];
+        let particles = [];
+        let player = { x: 0, y: 0, r: 0 };
+
+        // Spawning logic
+        let spawnTimer = 0;
+        let spawnInterval = 1400;
+        let spawnCount = 0;
+        let gameTime = 0;
+        let pendingSpawns = [];
+
+        bestEl.textContent = `BEST: ${bestScore}`;
+
+        function setGameState(newState) {
+            gameState = newState;
+            if (gameState === STATE_START) {
+                overlayEl.classList.remove('hidden');
+                titleEl.textContent = 'LAST PARRY';
+                hintEl.textContent = 'Tap or Space to Parry';
+            } else if (gameState === STATE_PLAYING) {
+                overlayEl.classList.add('hidden');
+                resetGame();
+            } else if (gameState === STATE_GAMEOVER) {
+                overlayEl.classList.remove('hidden');
+                titleEl.textContent = 'GAME OVER';
+                hintEl.textContent = 'Tap or Space to Retry';
+                if (score > bestScore) {
+                    bestScore = score;
+                    localStorage.setItem('last-parry-best', bestScore);
+                    bestEl.textContent = `BEST: ${bestScore}`;
+                }
+            }
+        }
+
+        function resetGame() {
+            score = 0;
+            multiplier = 1;
+            gameTime = 0;
+            spawnTimer = 0;
+            spawnInterval = 1400;
+            spawnCount = 0;
+            enemies = [];
+            particles = [];
+            pendingSpawns = [];
+            player = { x: width / 2, y: height / 2, r: PLAYER_RADIUS * u };
+            updateUI();
+        }
+
+        function updateUI() {
+            scoreEl.textContent = Math.floor(score);
+            multEl.textContent = `×${multiplier}`;
+        }
+
+        // Visibility handling
+        let isPaused = false;
+        document.addEventListener('visibilitychange', () => {
+            isPaused = document.hidden;
+            if (!isPaused) lastTime = performance.now();
+        });
+
+        function loop(t) {
+            if (isPaused) {
+                requestAnimationFrame(loop);
+                return;
+            }
+
+            dt = Math.min(t - lastTime, 50);
+            lastTime = t;
+
+            update(dt);
+            draw();
+
+            requestAnimationFrame(loop);
+        }
+
+        function update(dt) {
+            // Screen shake decay
+            if (screenShake > 0) {
+                screenShake = Math.max(0, screenShake - dt * 0.05);
+            }
+
+            if (hitStopTimer > 0) {
+                hitStopTimer -= dt;
+                return;
+            }
+
+            if (slowMoTimer > 0) {
+                slowMoTimer -= dt;
+                if (slowMoTimer <= 0) targetTimeScale = 1;
+            }
+
+            // Smoothly interpolate timeScale towards targetTimeScale
+            const easeSpeed = targetTimeScale > timeScale ? 0.005 : 0.02;
+            timeScale += (targetTimeScale - timeScale) * (1 - Math.pow(1 - easeSpeed, dt));
+
+            if (gameState !== STATE_PLAYING) return;
+
+            const effectiveDt = dt * timeScale;
+            gameTime += effectiveDt;
+
+            // Update Slashes
+            for (let i = slashes.length - 1; i >= 0; i--) {
+                slashes[i].life -= dt;
+                if (slashes[i].life <= 0) slashes.splice(i, 1);
+            }
+
+            if (parryLockout > 0) {
+                parryLockout -= effectiveDt;
+            }
+
+            // Spawning
+            spawnTimer -= effectiveDt;
+            if (spawnTimer <= 0) {
+                spawnCount++;
+                spawnInterval = Math.max(450, 1400 * Math.pow(0.97, spawnCount));
+                spawnTimer = spawnInterval;
+
+                if (gameTime > 30000 && Math.random() < 0.3) {
+                    const firstAngle = Math.random() * Math.PI * 2;
+                    spawnEnemy(firstAngle);
+                    const secondAngle = firstAngle + Math.PI + (Math.random() - 0.5) * 0.5;
+                    pendingSpawns.push({ angle: secondAngle, delay: 250 });
+                } else {
+                    spawnEnemy();
+                }
+            }
+
+            for (let i = pendingSpawns.length - 1; i >= 0; i--) {
+                pendingSpawns[i].delay -= effectiveDt;
+                if (pendingSpawns[i].delay <= 0) {
+                    spawnEnemy(pendingSpawns[i].angle);
+                    pendingSpawns.splice(i, 1);
+                }
+            }
+
+            // Dash speed ramp 0.9U/s -> 1.6U/s over 90s
+            const dashSpeed = (0.9 + Math.min(1, gameTime / 90000) * 0.7) * u / 1000;
+            // Telegraph time ramps 600ms -> 350ms
+            const telegraphTime = 600 - Math.min(1, gameTime / 90000) * 250;
+
+            // Update enemies
+            const toRemove = new Set();
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const e = enemies[i];
+                if (toRemove.has(e)) continue;
+
+                if (e.state === 'TELEGRAPH') {
+                    e.telegraphTimer -= effectiveDt;
+                    if (e.telegraphTimer <= 0) {
+                        e.state = 'DASH';
+                        const dx = player.x - e.x;
+                        const dy = player.y - e.y;
+                        const dist = Math.hypot(dx, dy);
+                        e.vx = (dx / dist) * dashSpeed;
+                        e.vy = (dy / dist) * dashSpeed;
+                    }
+                } else if (e.state === 'DASH') {
+                    e.trail.push({ x: e.x, y: e.y, t: 150 });
+                    if (e.trail.length > 10) e.trail.shift();
+
+                    e.x += e.vx * effectiveDt;
+                    e.y += e.vy * effectiveDt;
+
+                    const dx = player.x - e.x;
+                    const dy = player.y - e.y;
+                    const dist = Math.hypot(dx, dy);
+
+                    if (dist < player.r + e.r) {
+                        gameOver();
+                    }
+                } else if (e.state === 'LAUNCHED') {
+                    e.trail.push({ x: e.x, y: e.y, t: 150 });
+                    if (e.trail.length > 15) e.trail.shift();
+                    e.x += e.vx * effectiveDt;
+                    e.y += e.vy * effectiveDt;
+
+                    // Chain kill check
+                    for (let j = 0; j < enemies.length; j++) {
+                        const other = enemies[j];
+                        if (e === other || other.state === 'LAUNCHED' || toRemove.has(other)) continue;
+                        const dx = e.x - other.x;
+                        const dy = e.y - other.y;
+                        if (Math.hypot(dx, dy) < e.r + other.r) {
+                            toRemove.add(other);
+                            killEnemy(other, true, false); // Don't splice immediately
+                        }
+                    }
+
+                    const margin = 100;
+                    if (e.x < -margin || e.x > width + margin || e.y < -margin || e.y > height + margin) {
+                        toRemove.add(e);
+                    }
+                } else if (e.state === 'KNOCKBACK') {
+                    e.pauseTimer -= effectiveDt;
+                    if (e.pauseTimer <= 0) {
+                        e.state = 'TELEGRAPH';
+                        e.telegraphTimer = telegraphTime;
+                    }
+                }
+
+                for (let j = e.trail.length - 1; j >= 0; j--) {
+                    e.trail[j].t -= effectiveDt;
+                    if (e.trail[j].t <= 0) e.trail.splice(j, 1);
+                }
+            }
+            // Actual removal
+            if (toRemove.size > 0) {
+                enemies = enemies.filter(e => !toRemove.has(e));
+            }
+
+            // Update particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * effectiveDt;
+                p.y += p.vy * effectiveDt;
+                p.life -= effectiveDt;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function spawnEnemy(forceAngle = null) {
+            const angle = forceAngle !== null ? forceAngle : Math.random() * Math.PI * 2;
+            const dist = SPAWN_DIST * u;
+            const x = player.x + Math.cos(angle) * dist;
+            const y = player.y + Math.sin(angle) * dist;
+            const telegraphTime = 600 - Math.min(1, gameTime / 90000) * 250;
+
+            enemies.push({
+                x, y,
+                r: ENEMY_RADIUS * u,
+                state: 'TELEGRAPH',
+                telegraphTimer: telegraphTime,
+                maxTelegraph: telegraphTime,
+                vx: 0, vy: 0,
+                trail: []
+            });
+        }
+
+        function killEnemy(e, isChain, performSplice = true) {
+            spawnParticles(e.x, e.y, e.state === 'LAUNCHED' ? varColor('--cyan') : varColor('--violet'));
+            if (isChain) {
+                multiplier++;
+                score += 50 * multiplier;
+                applyChainSlowMo();
+            }
+            if (performSplice) {
+                const idx = enemies.indexOf(e);
+                if (idx > -1) enemies.splice(idx, 1);
+            }
+            updateUI();
+        }
+
+        function spawnParticles(x, y, color) {
+            for (let i = 0; i < 12; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = (Math.random() * 0.2 + 0.1) * u / 1000;
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 400 + Math.random() * 400,
+                    color
+                });
+            }
+        }
+
+        function varColor(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
+
+        // Audio
+        let audioCtx = null;
+        function playSound(mult) {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = mult > 0 ? 'triangle' : 'square';
+            const freq = 220 * Math.pow(2, Math.min(mult, 24) / 12);
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        function gameOver() {
+            setGameState(STATE_GAMEOVER);
+            spawnParticles(player.x, player.y, varColor('--cyan'));
+            screenShake = 15;
+            hitStopTimer = 300;
+        }
+
+        function applyChainSlowMo() {
+            const levels = [0.7, 0.55, 0.4, 0.3];
+            const currentLevel = Math.max(0, multiplier - 2);
+            targetTimeScale = levels[Math.min(currentLevel, levels.length - 1)];
+            slowMoTimer = 350;
+        }
+
+        // Input Handling
+        function onParry() {
+            if (gameState === STATE_START || (gameState === STATE_GAMEOVER && hitStopTimer <= 0)) {
+                setGameState(STATE_PLAYING);
+                return;
+            }
+
+            if (gameState !== STATE_PLAYING || parryLockout > 0) return;
+
+            let hit = false;
+            let bestTier = 'WHIFF';
+
+            const dashSpeed = (0.9 + Math.min(1, gameTime / 90000) * 0.7) * u / 1000;
+
+            enemies.forEach(e => {
+                if (e.state !== 'DASH') return;
+
+                const dx = player.x - e.x;
+                const dy = player.y - e.y;
+                const dist = Math.hypot(dx, dy);
+                const gap = dist - (player.r + e.r);
+                const timeToContact = gap / dashSpeed;
+
+                if (timeToContact <= PARRY_WINDOW_TOTAL && timeToContact >= -50) {
+                    hit = true;
+                    if (timeToContact <= PARRY_WINDOW_PERFECT) {
+                        e.state = 'LAUNCHED';
+                        e.vx = -e.vx * 3;
+                        e.vy = -e.vy * 3;
+                        bestTier = 'PERFECT';
+                    } else {
+                        e.state = 'KNOCKBACK';
+                        e.pauseTimer = 400;
+                        const angle = Math.atan2(e.y - player.y, e.x - player.x);
+                        const kbDist = 0.45 * u;
+                        e.x = player.x + Math.cos(angle) * kbDist;
+                        e.y = player.y + Math.sin(angle) * kbDist;
+                        if (bestTier !== 'PERFECT') bestTier = 'LOOSE';
+                    }
+                }
+            });
+
+            if (hit) {
+                if (bestTier === 'PERFECT') {
+                    multiplier++;
+                    score += 50 * multiplier;
+                    hitStopTimer = 120;
+                    screenShake = 8;
+                    spawnSlash(player.x, player.y);
+                    playSound(multiplier);
+                    applyChainSlowMo();
+                } else {
+                    multiplier = 1;
+                    score += 10;
+                    screenShake = 3;
+                    playSound(0);
+                }
+            } else {
+                multiplier = 1;
+                parryLockout = 250;
+            }
+
+            updateUI();
+        }
+
+        window.addEventListener('keydown', e => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                onParry();
+            }
+        });
+
+        window.addEventListener('pointerdown', e => {
+            e.preventDefault();
+            onParry();
+        });
+
+        // Slash effect
+        let slashes = [];
+        function spawnSlash(x, y) {
+            slashes.push({ x, y, life: 200 });
+            // Add sparks
+            for (let i = 0; i < 25; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = (Math.random() * 0.4 + 0.2) * u / 1000;
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 300 + Math.random() * 300,
+                    color: '#fff'
+                });
+            }
+        }
+
+        function draw() {
+            ctx.save();
+
+            if (screenShake > 0) {
+                const sx = (Math.random() - 0.5) * screenShake;
+                const sy = (Math.random() - 0.5) * screenShake;
+                ctx.translate(sx, sy);
+            }
+
+            ctx.fillStyle = '#07080f';
+            ctx.fillRect(0, 0, width, height);
+
+            if (gameState === STATE_PLAYING || gameState === STATE_GAMEOVER) {
+                // Draw Slashes
+                slashes.forEach((s) => {
+                    ctx.beginPath();
+                    ctx.arc(s.x, s.y, player.r * 2.5, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${s.life / 200})`;
+                    ctx.lineWidth = 4;
+                    ctx.stroke();
+                });
+
+                // Draw Player (glowing diamond)
+                if (gameState === STATE_PLAYING) {
+                    ctx.save();
+                    ctx.translate(player.x, player.y);
+                    ctx.rotate(Math.PI / 4);
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = varColor('--cyan');
+                    ctx.strokeStyle = varColor('--cyan');
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(-player.r / 1.4, -player.r / 1.4, player.r * 1.4, player.r * 1.4);
+                    ctx.restore();
+                }
+
+                // Draw Enemies
+                enemies.forEach(e => {
+                    // Draw Trail
+                    if (e.state === 'DASH' || e.state === 'LAUNCHED') {
+                        e.trail.forEach((t, i) => {
+                            const alpha = (i / e.trail.length) * 0.5;
+                            ctx.beginPath();
+                            ctx.arc(t.x, t.y, e.r * (i / e.trail.length), 0, Math.PI * 2);
+                            ctx.fillStyle = e.state === 'LAUNCHED' ? `rgba(70, 200, 255, ${alpha})` : `rgba(255, 110, 199, ${alpha})`;
+                            ctx.fill();
+                        });
+                    }
+
+                    ctx.beginPath();
+                    ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+
+                    if (e.state === 'TELEGRAPH') {
+                        const p = 1 - e.telegraphTimer / e.maxTelegraph;
+                        ctx.shadowBlur = 10 + p * 15;
+                        const r = 124 + p * (255 - 124);
+                        const g = 108 + p * (110 - 108);
+                        const b = 255 + p * (199 - 255);
+                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                        ctx.shadowColor = ctx.fillStyle;
+                    } else if (e.state === 'DASH') {
+                        ctx.fillStyle = varColor('--pink');
+                        ctx.shadowBlur = 15;
+                        ctx.shadowColor = varColor('--pink');
+                    } else if (e.state === 'LAUNCHED') {
+                        ctx.fillStyle = '#fff';
+                        ctx.shadowBlur = 20;
+                        ctx.shadowColor = varColor('--cyan');
+                    } else if (e.state === 'KNOCKBACK') {
+                        ctx.fillStyle = varColor('--violet');
+                        ctx.shadowBlur = 5;
+                        ctx.shadowColor = varColor('--violet');
+                    }
+
+                    ctx.fill();
+                });
+
+                // Draw Particles
+                particles.forEach(p => {
+                    ctx.globalAlpha = p.life / 800;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.globalAlpha = 1;
+            }
+
+            ctx.restore();
+        }
+
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html>

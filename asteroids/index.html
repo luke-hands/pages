@@ -41,31 +41,58 @@
             text-shadow: 0 0 10px rgba(124, 108, 255, 0.5);
         }
 
-        #game-over {
+        #game-over, #start-screen {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             text-align: center;
             background: rgba(7, 8, 15, 0.85);
-            padding: 2rem;
+            padding: 2.5rem;
             border: 2px solid var(--accent);
-            border-radius: 12px;
+            border-radius: 16px;
             display: none;
-            backdrop-filter: blur(8px);
+            backdrop-filter: blur(12px);
+            z-index: 100;
+            min-width: 300px;
         }
 
-        #game-over h1 {
+        #start-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #game-over h1, #start-screen h1 {
             font-size: 3rem;
-            margin: 0 0 1rem 0;
+            margin: 0 0 0.5rem 0;
             background: linear-gradient(to bottom, #fff, var(--accent));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            letter-spacing: 4px;
         }
 
-        #game-over p {
-            margin-bottom: 1.5rem;
+        #game-over p, #start-screen .instructions {
+            margin-bottom: 2rem;
             color: #8a90a6;
+            line-height: 1.6;
+        }
+
+        .instruction-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+        }
+
+        .key {
+            padding: 4px 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            font-family: monospace;
+            color: var(--accent);
         }
 
         button {
@@ -104,6 +131,9 @@
             bottom: 40px;
             right: 40px;
             display: none;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 20px;
             pointer-events: none;
             user-select: none;
             z-index: 10;
@@ -111,28 +141,40 @@
 
         @media (pointer: coarse) {
             #mobile-controls {
-                display: block;
+                display: flex;
             }
         }
 
         .mobile-btn {
-            width: 120px;
-            height: 120px;
+            width: 100px;
+            height: 100px;
             border-radius: 50%;
-            background: rgba(255, 110, 199, 0.1) !important;
-            border: 3px solid #ff6ec7 !important;
+            background: rgba(7, 8, 15, 0.8) !important;
+            border: 3px solid var(--fg) !important;
             color: var(--fg);
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             touch-action: none;
             -webkit-tap-highlight-color: transparent;
             padding: 0 !important;
             transition: opacity 0.1s, transform 0.1s;
             pointer-events: auto;
+        }
+
+        #fire-btn {
+            border-color: #ff6ec7 !important;
             box-shadow: 0 0 20px rgba(255, 110, 199, 0.2);
+            color: #ff6ec7;
+        }
+
+        #thrust-btn {
+            border-color: #46c8ff !important;
+            box-shadow: 0 0 20px rgba(70, 200, 255, 0.2);
+            color: #46c8ff;
+            margin-right: 60px;
         }
 
         .mobile-btn:active {
@@ -190,16 +232,28 @@
         <div id="score">0</div>
     </div>
 
+    <div id="start-screen">
+        <h1>ASTEROIDS</h1>
+        <div class="instructions" id="desktop-instructions">
+            <div class="instruction-item"><span class="key">Arrows</span> to move & thrust</div>
+            <div class="instruction-item"><span class="key">Space</span> to fire</div>
+        </div>
+        <div class="instructions" id="mobile-instructions" style="display: none;">
+            <div class="instruction-item">Joystick to steer</div>
+            <div class="instruction-item">Buttons to thrust & fire</div>
+        </div>
+        <button id="start-btn">START GAME</button>
+    </div>
+
     <div id="game-over">
         <h1>GAME OVER</h1>
         <p>Final Score: <span id="final-score">0</span></p>
         <button id="restart-btn">RESTART</button>
     </div>
 
-    <div id="controls-hint">Arrows to move/thrust • Space to fire</div>
-
     <div id="mobile-controls">
         <button id="fire-btn" class="mobile-btn">FIRE</button>
+        <button id="thrust-btn" class="mobile-btn">THRUST</button>
     </div>
 
     <div id="joystick-base">
@@ -213,8 +267,10 @@
         const ctx = canvas.getContext('2d');
         const scoreEl = document.getElementById('score');
         const gameOverEl = document.getElementById('game-over');
+        const startScreenEl = document.getElementById('start-screen');
         const finalScoreEl = document.getElementById('final-score');
         const restartBtn = document.getElementById('restart-btn');
+        const startBtn = document.getElementById('start-btn');
 
         let width, height;
 
@@ -251,13 +307,16 @@
             a: -90 * Math.PI / 180, // convert to radians
             rot: 0,
             thrusting: false,
-            thrust: { x: 0, y: 0 }
+            thrust: { x: 0, y: 0 },
+            targetA: null
         };
 
         let lasers = [];
         let asteroids = [];
         let score = 0;
-        let gameActive = true;
+        let gameActive = false;
+        let shakeTime = 0;
+        let hitStopFrames = 0;
 
         function initShip() {
             ship.x = width / 2;
@@ -338,6 +397,7 @@
         }
 
         bindControl('fire-btn', 'Space');
+        bindControl('thrust-btn', 'ArrowUp');
 
         // Virtual Joystick
         const joystickBase = document.getElementById('joystick-base');
@@ -390,20 +450,10 @@
                     joystickKnob.style.left = `calc(50% + ${knobX}px)`;
                     joystickKnob.style.top = `calc(50% + ${knobY}px)`;
 
-                    // Reset keys
-                    keys['ArrowLeft'] = false;
-                    keys['ArrowRight'] = false;
-                    keys['ArrowUp'] = false;
-
-                    // Horizontal - Rotation
-                    if (Math.abs(knobX) > DEADZONE) {
-                        if (knobX < 0) keys['ArrowLeft'] = true;
-                        else keys['ArrowRight'] = true;
-                    }
-
-                    // Vertical - Thrust (Pushing up)
-                    if (knobY < -DEADZONE) {
-                        keys['ArrowUp'] = true;
+                    if (dist > DEADZONE) {
+                        ship.targetA = angle;
+                    } else {
+                        ship.targetA = null;
                     }
 
                     break;
@@ -471,16 +521,10 @@
             joystickKnob.style.left = `calc(50% + ${knobX}px)`;
             joystickKnob.style.top = `calc(50% + ${knobY}px)`;
 
-            keys['ArrowLeft'] = false;
-            keys['ArrowRight'] = false;
-            keys['ArrowUp'] = false;
-
-            if (Math.abs(knobX) > DEADZONE) {
-                if (knobX < 0) keys['ArrowLeft'] = true;
-                else keys['ArrowRight'] = true;
-            }
-            if (knobY < -DEADZONE) {
-                keys['ArrowUp'] = true;
+            if (dist > DEADZONE) {
+                ship.targetA = angle;
+            } else {
+                ship.targetA = null;
             }
         });
 
@@ -498,9 +542,7 @@
                 joystickKnob.style.left = '50%';
                 joystickKnob.style.top = '50%';
 
-                keys['ArrowLeft'] = false;
-                keys['ArrowRight'] = false;
-                keys['ArrowUp'] = false;
+                ship.targetA = null;
             }
         };
 
@@ -521,38 +563,67 @@
             asteroids.splice(index, 1);
             score += 10;
             scoreEl.innerText = score;
+            hitStopFrames = 3; // ~50ms hit stop
 
             if (asteroids.length === 0) {
-                // Next level (more asteroids)
-                // For now just respawn
                 createAsteroids();
             }
         }
 
         function gameOver() {
             gameActive = false;
+            shakeTime = 30; // 0.5s shake
             finalScoreEl.innerText = score;
-            gameOverEl.style.display = 'block';
+            setTimeout(() => {
+                gameOverEl.style.display = 'block';
+            }, 500);
         }
 
-        restartBtn.addEventListener('click', () => {
+        function startGame() {
             score = 0;
             scoreEl.innerText = score;
             gameActive = true;
+            startScreenEl.style.display = 'none';
             gameOverEl.style.display = 'none';
             initShip();
             createAsteroids();
             lasers = [];
-        });
+        }
+
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', startGame);
+
+        // Detect mobile for instructions
+        if (window.matchMedia('(pointer: coarse)').matches) {
+            document.getElementById('desktop-instructions').style.display = 'none';
+            document.getElementById('mobile-instructions').style.display = 'block';
+        }
 
         function update() {
+            if (hitStopFrames > 0) {
+                hitStopFrames--;
+                return;
+            }
             if (!gameActive) return;
 
             // Rotation
             ship.rot = 0;
-            if (keys['ArrowLeft']) ship.rot = -SHIP_TURN_SPEED * Math.PI / 180 / 60;
-            if (keys['ArrowRight']) ship.rot = SHIP_TURN_SPEED * Math.PI / 180 / 60;
-            ship.a += ship.rot;
+            if (ship.targetA !== null) {
+                let diff = ship.targetA - ship.a;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+
+                const step = SHIP_TURN_SPEED * Math.PI / 180 / 60;
+                if (Math.abs(diff) < step) {
+                    ship.a = ship.targetA;
+                } else {
+                    ship.a += Math.sign(diff) * step;
+                }
+            } else {
+                if (keys['ArrowLeft']) ship.rot = -SHIP_TURN_SPEED * Math.PI / 180 / 60;
+                if (keys['ArrowRight']) ship.rot = SHIP_TURN_SPEED * Math.PI / 180 / 60;
+                ship.a += ship.rot;
+            }
 
             // Thrust
             ship.thrusting = keys['ArrowUp'];
@@ -632,18 +703,23 @@
         }
 
         function drawLasers() {
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "#ff6ec7";
             for (let i = 0; i < lasers.length; i++) {
-                ctx.fillStyle = "salmon";
+                ctx.fillStyle = "#ff6ec7";
                 ctx.beginPath();
-                ctx.arc(lasers[i].x, lasers[i].y, SHIP_SIZE / 15, 0, Math.PI * 2);
+                ctx.arc(lasers[i].x, lasers[i].y, SHIP_SIZE / 10, 0, Math.PI * 2);
                 ctx.fill();
             }
+            ctx.shadowBlur = 0;
         }
 
         function drawAsteroids() {
             ctx.lineWidth = 2;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = "#7c6cff";
             for (let i = 0; i < asteroids.length; i++) {
-                ctx.strokeStyle = "slategrey";
+                ctx.strokeStyle = "#7c6cff";
                 let a = asteroids[i];
                 ctx.beginPath();
                 ctx.moveTo(
@@ -659,11 +735,14 @@
                 ctx.closePath();
                 ctx.stroke();
             }
+            ctx.shadowBlur = 0;
         }
 
         function drawShip() {
-            ctx.strokeStyle = "white";
+            ctx.strokeStyle = "#46c8ff";
             ctx.lineWidth = 2;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "#46c8ff";
             ctx.beginPath();
             ctx.moveTo(
                 ship.x + 4 / 3 * ship.r * Math.cos(ship.a),
@@ -679,6 +758,7 @@
             );
             ctx.closePath();
             ctx.stroke();
+            ctx.shadowBlur = 0;
 
             if (ship.thrusting) {
                 ctx.fillStyle = "#7c6cff";
@@ -703,12 +783,22 @@
         function loop() {
             update();
 
+            ctx.save();
+            if (shakeTime > 0) {
+                const shakeX = (Math.random() - 0.5) * 15;
+                const shakeY = (Math.random() - 0.5) * 15;
+                ctx.translate(shakeX, shakeY);
+                shakeTime--;
+            }
+
             ctx.fillStyle = '#07080f';
-            ctx.fillRect(0, 0, width, height);
+            ctx.fillRect(-20, -20, width + 40, height + 40);
 
             drawShip();
             drawLasers();
             drawAsteroids();
+
+            ctx.restore();
 
             requestAnimationFrame(loop);
         }

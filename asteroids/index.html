@@ -274,11 +274,13 @@
         <div id="joystick-knob"></div>
     </div>
 
-    <canvas id="gameCanvas"></canvas>
+    <div id="game-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.2.4/pixi.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi-filters@latest/dist/pixi-filters.js"></script>
 
     <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
         const scoreEl = document.getElementById('score');
         const livesEl = document.getElementById('lives');
         const highScoreEl = document.getElementById('high-score');
@@ -288,18 +290,38 @@
         const restartBtn = document.getElementById('restart-btn');
         const startBtn = document.getElementById('start-btn');
 
-        let width, height;
+        // PixiJS Setup
+        const app = new PIXI.Application({
+            background: '#07080f',
+            resizeTo: window,
+            antialias: true,
+            resolution: window.devicePixelRatio || 1,
+            autoDensity: true,
+        });
+        document.getElementById('game-container').appendChild(app.view);
+
+        // Matter.js Setup
+        const Engine = Matter.Engine,
+              World = Matter.World,
+              Bodies = Matter.Bodies,
+              Body = Matter.Body,
+              Composite = Matter.Composite,
+              Events = Matter.Events,
+              Vector = Matter.Vector;
+
+        const engine = Engine.create();
+        engine.gravity.y = 0; // Space has no gravity
+
+        let width = window.innerWidth;
+        let height = window.innerHeight;
 
         function resize() {
             width = window.innerWidth;
             height = window.innerHeight;
-            canvas.width = width * window.devicePixelRatio;
-            canvas.height = height * window.devicePixelRatio;
-            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            app.renderer.resize(width, height);
         }
 
         window.addEventListener('resize', resize);
-        resize();
 
         // Constants
         const SHIP_SIZE = 20;
@@ -315,17 +337,28 @@
         const ASTEROID_VERT = 10; // average number of vertices on each asteroid
         const ASTEROID_JAG = 0.4; // jaggedness of the asteroids (0 = none, 1 = lots)
 
+        // Containers for Bloom
+        const worldContainer = new PIXI.Container();
+        const uiContainer = new PIXI.Container();
+        app.stage.addChild(worldContainer);
+        app.stage.addChild(uiContainer);
+
+        const bloomFilter = new PIXI.filters.AdvancedBloomFilter({
+            threshold: 0.3,
+            bloomScale: 1.5,
+            brightness: 1,
+            blur: 4
+        });
+        worldContainer.filters = [bloomFilter];
+
         // State
         let ship = {
-            x: 0,
-            y: 0,
-            r: SHIP_SIZE / 2,
-            a: -90 * Math.PI / 180, // convert to radians
-            rot: 0,
+            body: null,
+            graphics: null,
             thrusting: false,
-            thrust: { x: 0, y: 0 },
+            canShoot: true,
             targetA: null,
-            canShoot: true
+            radius: SHIP_SIZE
         };
 
         let lasers = [];
@@ -338,58 +371,184 @@
         let gameActive = false;
         let shakeTime = 0;
         let hitStopTimer = 0;
+        let particles = [];
 
-        function initShip() {
-            ship.x = width / 2;
-            ship.y = height / 2;
-            ship.thrust = { x: 0, y: 0 };
-            ship.a = -90 * Math.PI / 180;
-            ship.canShoot = true;
+        function createExplosion(x, y, r) {
+            const count = 20 + Math.floor(r / 2);
+            for (let i = 0; i < count; i++) {
+                const p = new PIXI.Graphics();
+                p.beginFill(0x7c6cff);
+                p.drawCircle(0, 0, Math.random() * 3 + 1);
+                p.endFill();
+                p.x = x;
+                p.y = y;
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 5 + 2;
+                particles.push({
+                    graphics: p,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 1.0,
+                    decay: Math.random() * 0.02 + 0.02
+                });
+                worldContainer.addChild(p);
+            }
         }
 
-        function createAsteroid(x, y, r) {
-            let lvlMult = 1 + level * 0.1;
-            let roid = {
-                x: x,
-                y: y,
-                xv: (Math.random() * 0.5 + 0.5) * ASTEROID_SPD * lvlMult * (Math.random() < 0.5 ? 1 : -1),
-                yv: (Math.random() * 0.5 + 0.5) * ASTEROID_SPD * lvlMult * (Math.random() < 0.5 ? 1 : -1),
-                r: r,
-                a: Math.random() * Math.PI * 2,
-                vert: Math.floor(Math.random() * (ASTEROID_VERT + 1) + ASTEROID_VERT / 2),
-                offs: []
-            };
-            for (let i = 0; i < roid.vert; i++) {
-                roid.offs.push(Math.random() * ASTEROID_JAG * 2 + 1 - ASTEROID_JAG);
+        function drawShipGraphics() {
+            if (!ship.graphics) return;
+            ship.graphics.clear();
+
+            if (invulnerableTime > 0 && Math.floor(Date.now() / 100) % 2 === 0) {
+                return;
             }
-            return roid;
+
+            ship.graphics.lineStyle(2, 0x46c8ff);
+            ship.graphics.moveTo(SHIP_SIZE * 1.2, 0);
+            ship.graphics.lineTo(-SHIP_SIZE * 0.8, -SHIP_SIZE * 0.8);
+            ship.graphics.lineTo(-SHIP_SIZE * 0.8, SHIP_SIZE * 0.8);
+            ship.graphics.closePath();
+
+            if (ship.thrusting) {
+                ship.graphics.beginFill(0x7c6cff);
+                ship.graphics.lineStyle(0);
+                ship.graphics.moveTo(-SHIP_SIZE * 0.8, -SHIP_SIZE * 0.4);
+                ship.graphics.lineTo(-SHIP_SIZE * 1.5, 0);
+                ship.graphics.lineTo(-SHIP_SIZE * 0.8, SHIP_SIZE * 0.4);
+                ship.graphics.endFill();
+            }
+        }
+
+        function initShip() {
+            if (ship.body) World.remove(engine.world, ship.body);
+            if (ship.graphics) worldContainer.removeChild(ship.graphics);
+
+            ship.body = Bodies.polygon(width / 2, height / 2, 3, SHIP_SIZE, {
+                frictionAir: 0.05,
+                restitution: 0.5,
+                label: 'ship',
+                inertia: 1000
+            });
+
+            World.add(engine.world, ship.body);
+
+            ship.graphics = new PIXI.Graphics();
+            drawShipGraphics();
+            worldContainer.addChild(ship.graphics);
+
+            ship.canShoot = true;
+            ship.targetA = null;
+        }
+
+        function createAsteroid(x, y, r, vertices = null) {
+            let lvlMult = 1 + level * 0.1;
+            let verts = vertices;
+
+            if (!verts) {
+                verts = [];
+                const numVerts = Math.floor(Math.random() * (ASTEROID_VERT + 1) + ASTEROID_VERT / 2);
+                for (let i = 0; i < numVerts; i++) {
+                    const angle = (i / numVerts) * Math.PI * 2;
+                    const dist = r * (Math.random() * ASTEROID_JAG * 2 + 1 - ASTEROID_JAG);
+                    verts.push({ x: Math.cos(angle) * dist, y: Math.sin(angle) * dist });
+                }
+            }
+
+            const body = Bodies.polygon(x, y, verts.length, r, {
+                frictionAir: 0,
+                restitution: 0.8,
+                label: 'asteroid',
+                velocity: {
+                    x: (Math.random() - 0.5) * ASTEROID_SPD * lvlMult / 30,
+                    y: (Math.random() - 0.5) * ASTEROID_SPD * lvlMult / 30
+                }
+            });
+
+            const graphics = new PIXI.Graphics();
+            drawAsteroidGraphics(graphics, verts);
+            worldContainer.addChild(graphics);
+
+            return {
+                body: body,
+                graphics: graphics,
+                radius: r,
+                vertices: verts
+            };
+        }
+
+        function drawAsteroidGraphics(g, verts) {
+            g.clear();
+            g.lineStyle(2, 0x7c6cff);
+            g.moveTo(verts[0].x, verts[0].y);
+            for (let i = 1; i < verts.length; i++) {
+                g.lineTo(verts[i].x, verts[i].y);
+            }
+            g.closePath();
         }
 
         function createAsteroids() {
+            // Clean up existing
+            asteroids.forEach(a => {
+                World.remove(engine.world, a.body);
+                worldContainer.removeChild(a.graphics);
+            });
             asteroids = [];
+
             let x, y;
             const num = ASTEROID_NUM + level;
             const exclusionRadius = Math.min(width, height) * 0.25;
             for (let i = 0; i < num; i++) {
                 let attempts = 0;
+                let shipX = ship.body ? ship.body.position.x : width / 2;
+                let shipY = ship.body ? ship.body.position.y : height / 2;
                 do {
                     x = Math.floor(Math.random() * width);
                     y = Math.floor(Math.random() * height);
                     attempts++;
-                } while (attempts < 100 && Math.hypot(ship.x - x, ship.y - y) < exclusionRadius);
-                asteroids.push(createAsteroid(x, y, Math.ceil(ASTEROID_SIZE / 2)));
+                } while (attempts < 100 && Math.hypot(shipX - x, shipY - y) < exclusionRadius);
+
+                const roid = createAsteroid(x, y, Math.ceil(ASTEROID_SIZE / 2));
+                asteroids.push(roid);
+                World.add(engine.world, roid.body);
             }
         }
 
         function shootLaser() {
-            if (ship.canShoot && lasers.length < LASER_MAX) {
-                lasers.push({
-                    x: ship.x + 4 / 3 * ship.r * Math.cos(ship.a),
-                    y: ship.y + 4 / 3 * ship.r * Math.sin(ship.a),
-                    xv: LASER_SPD * Math.cos(ship.a),
-                    yv: LASER_SPD * Math.sin(ship.a),
-                    dist: 0
+            if (ship.canShoot && lasers.length < LASER_MAX && ship.body) {
+                const angle = ship.body.angle;
+                const pos = ship.body.position;
+                const tipX = pos.x + SHIP_SIZE * 1.2 * Math.cos(angle);
+                const tipY = pos.y + SHIP_SIZE * 1.2 * Math.sin(angle);
+
+                const laserBody = Bodies.circle(tipX, tipY, 2, {
+                    isSensor: true,
+                    label: 'laser',
+                    frictionAir: 0,
+                    velocity: {
+                        x: Math.cos(angle) * LASER_SPD / 60,
+                        y: Math.sin(angle) * LASER_SPD / 60
+                    }
                 });
+
+                const laserGraphics = new PIXI.Graphics();
+                laserGraphics.beginFill(0xff6ec7);
+                laserGraphics.drawCircle(0, 0, 3);
+                laserGraphics.endFill();
+                worldContainer.addChild(laserGraphics);
+
+                lasers.push({
+                    body: laserBody,
+                    graphics: laserGraphics,
+                    dist: 0,
+                    maxDist: LASER_DIST * width
+                });
+
+                World.add(engine.world, laserBody);
+                Body.setVelocity(laserBody, {
+                    x: Math.cos(angle) * (LASER_SPD / 60),
+                    y: Math.sin(angle) * (LASER_SPD / 60)
+                });
+
                 playSound(440, 'square', 0.1, 0.05);
             }
             ship.canShoot = false;
@@ -577,9 +736,10 @@
 
         function destroyAsteroid(index) {
             playSound(100 + Math.random() * 100, 'sawtooth', 0.2, 0.1);
-            let x = asteroids[index].x;
-            let y = asteroids[index].y;
-            let r = asteroids[index].r;
+            let a = asteroids[index];
+            let x = a.body.position.x;
+            let y = a.body.position.y;
+            let r = a.radius;
 
             // Split asteroid if it's big enough
             if (r > Math.ceil(ASTEROID_SIZE / 8)) {
@@ -591,13 +751,16 @@
                         y + Math.sin(angle) * childR,
                         childR
                     );
-                    // Add separation velocity
-                    roid.xv += Math.cos(angle) * ASTEROID_SPD;
-                    roid.yv += Math.sin(angle) * ASTEROID_SPD;
                     asteroids.push(roid);
+                    World.add(engine.world, roid.body);
                 }
             }
 
+            // Explosion Particles
+            createExplosion(x, y, r);
+
+            World.remove(engine.world, a.body);
+            worldContainer.removeChild(a.graphics);
             asteroids.splice(index, 1);
             score += 10;
             scoreEl.innerText = score;
@@ -640,8 +803,16 @@
             lasers = [];
         }
 
-        startBtn.addEventListener('click', () => { initAudio(); startGame(); });
-        restartBtn.addEventListener('click', () => { initAudio(); startGame(); });
+        startBtn.addEventListener('click', () => {
+            console.log("Start button clicked");
+            initAudio();
+            startGame();
+        });
+        restartBtn.addEventListener('click', () => {
+            console.log("Restart button clicked");
+            initAudio();
+            startGame();
+        });
 
         // Detect mobile for instructions
         if (window.matchMedia('(pointer: coarse)').matches) {
@@ -660,34 +831,43 @@
                 invulnerableTime -= dt;
             }
 
-            // Rotation
-            ship.rot = 0;
-            if (ship.targetA !== null) {
-                let diff = ship.targetA - ship.a;
-                while (diff < -Math.PI) diff += Math.PI * 2;
-                while (diff > Math.PI) diff -= Math.PI * 2;
+            Engine.update(engine, dt * 1000);
 
-                const step = SHIP_TURN_SPEED * Math.PI / 180 * dt;
-                if (Math.abs(diff) < step) {
-                    ship.a = ship.targetA;
+            // Rotation and Thrust logic for Matter.js ship
+            if (ship.body) {
+                if (ship.targetA !== null) {
+                    let diff = ship.targetA - ship.body.angle;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+
+                    Body.setAngularVelocity(ship.body, diff * 0.1);
                 } else {
-                    ship.a += Math.sign(diff) * step;
+                    let rot = 0;
+                    if (keys['ArrowLeft']) rot = -0.05;
+                    if (keys['ArrowRight']) rot = 0.05;
+                    if (rot !== 0) {
+                        Body.setAngularVelocity(ship.body, rot);
+                    }
                 }
-            } else {
-                if (keys['ArrowLeft']) ship.rot = -SHIP_TURN_SPEED * Math.PI / 180 * dt;
-                if (keys['ArrowRight']) ship.rot = SHIP_TURN_SPEED * Math.PI / 180 * dt;
-                ship.a += ship.rot;
-            }
 
-            // Thrust
-            ship.thrusting = keys['ArrowUp'];
-            if (ship.thrusting) {
-                ship.thrust.x += SHIP_THRUST * 60 * dt * Math.cos(ship.a);
-                ship.thrust.y += SHIP_THRUST * 60 * dt * Math.sin(ship.a);
-                if (Math.random() < 0.1) playSound(50 + Math.random() * 20, 'sawtooth', 0.1, 0.02);
-            } else {
-                ship.thrust.x *= Math.pow(FRICTION, dt * 60);
-                ship.thrust.y *= Math.pow(FRICTION, dt * 60);
+                ship.thrusting = keys['ArrowUp'];
+                if (ship.thrusting) {
+                    const force = Vector.rotate({ x: 0.12 * dt, y: 0 }, ship.body.angle);
+                    Body.applyForce(ship.body, ship.body.position, force);
+                    if (Math.random() < 0.1) playSound(50 + Math.random() * 20, 'sawtooth', 0.1, 0.02);
+                }
+
+                // Sync graphics
+                ship.graphics.x = ship.body.position.x;
+                ship.graphics.y = ship.body.position.y;
+                ship.graphics.rotation = ship.body.angle;
+                drawShipGraphics();
+
+                // Wraparound
+                if (ship.body.position.x < -SHIP_SIZE) Body.setPosition(ship.body, { x: width + SHIP_SIZE, y: ship.body.position.y });
+                if (ship.body.position.x > width + SHIP_SIZE) Body.setPosition(ship.body, { x: -SHIP_SIZE, y: ship.body.position.y });
+                if (ship.body.position.y < -SHIP_SIZE) Body.setPosition(ship.body, { x: ship.body.position.x, y: height + SHIP_SIZE });
+                if (ship.body.position.y > height + SHIP_SIZE) Body.setPosition(ship.body, { x: ship.body.position.x, y: -SHIP_SIZE });
             }
 
             // Shooting
@@ -697,52 +877,65 @@
                 ship.canShoot = true;
             }
 
-            // Move ship
-            ship.x += ship.thrust.x * dt;
-            ship.y += ship.thrust.y * dt;
-
-            // Ship Wraparound
-            if (ship.x < 0 - ship.r) ship.x = width + ship.r;
-            else if (ship.x > width + ship.r) ship.x = 0 - ship.r;
-            if (ship.y < 0 - ship.r) ship.y = height + ship.r;
-            else if (ship.y > height + ship.r) ship.y = 0 - ship.r;
-
             // Move lasers
             for (let i = lasers.length - 1; i >= 0; i--) {
+                const l = lasers[i];
                 // Check distance travelled
-                if (lasers[i].dist > LASER_DIST * width) {
+                l.dist += Vector.magnitude(l.body.velocity) * dt * 60;
+                if (l.dist > l.maxDist) {
+                    World.remove(engine.world, l.body);
+                    worldContainer.removeChild(l.graphics);
                     lasers.splice(i, 1);
                     continue;
                 }
 
-                lasers[i].x += lasers[i].xv * dt;
-                lasers[i].y += lasers[i].yv * dt;
-                lasers[i].dist += Math.hypot(lasers[i].xv * dt, lasers[i].yv * dt);
+                // Sync graphics
+                l.graphics.x = l.body.position.x;
+                l.graphics.y = l.body.position.y;
 
                 // Laser Wraparound
-                if (lasers[i].x < 0) lasers[i].x = width;
-                else if (lasers[i].x > width) lasers[i].x = 0;
-                if (lasers[i].y < 0) lasers[i].y = height;
-                else if (lasers[i].y > height) lasers[i].y = 0;
+                if (l.body.position.x < 0) Body.setPosition(l.body, { x: width, y: l.body.position.y });
+                else if (l.body.position.x > width) Body.setPosition(l.body, { x: 0, y: l.body.position.y });
+                if (l.body.position.y < 0) Body.setPosition(l.body, { x: l.body.position.x, y: height });
+                else if (l.body.position.y > height) Body.setPosition(l.body, { x: l.body.position.x, y: 0 });
             }
 
             // Move asteroids
             for (let i = 0; i < asteroids.length; i++) {
-                asteroids[i].x += asteroids[i].xv * dt;
-                asteroids[i].y += asteroids[i].yv * dt;
+                const a = asteroids[i];
+                a.graphics.x = a.body.position.x;
+                a.graphics.y = a.body.position.y;
+                a.graphics.rotation = a.body.angle;
 
                 // Asteroid Wraparound
-                if (asteroids[i].x < 0 - asteroids[i].r) asteroids[i].x = width + asteroids[i].r;
-                else if (asteroids[i].x > width + asteroids[i].r) asteroids[i].x = 0 - asteroids[i].r;
-                if (asteroids[i].y < 0 - asteroids[i].r) asteroids[i].y = height + asteroids[i].r;
-                else if (asteroids[i].y > height + asteroids[i].r) asteroids[i].y = 0 - asteroids[i].r;
+                if (a.body.position.x < -a.radius) Body.setPosition(a.body, { x: width + a.radius, y: a.body.position.y });
+                else if (a.body.position.x > width + a.radius) Body.setPosition(a.body, { x: -a.radius, y: a.body.position.y });
+                if (a.body.position.y < -a.radius) Body.setPosition(a.body, { x: a.body.position.x, y: height + a.radius });
+                else if (a.body.position.y > height + a.radius) Body.setPosition(a.body, { x: a.body.position.x, y: -a.radius });
             }
 
-            // Detect Laser collisions
+            // Update particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.graphics.x += p.vx * dt * 60;
+                p.graphics.y += p.vy * dt * 60;
+                p.life -= p.decay * dt * 60;
+                p.graphics.alpha = p.life;
+                if (p.life <= 0) {
+                    worldContainer.removeChild(p.graphics);
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Detect Laser collisions (Matter.js handle this via events)
+            // But for now, simple distance check or keep lasers as sensors
             for (let i = lasers.length - 1; i >= 0; i--) {
                 for (let j = asteroids.length - 1; j >= 0; j--) {
-                    if (Math.hypot(lasers[i].x - asteroids[j].x, lasers[i].y - asteroids[j].y) < asteroids[j].r) {
+                    const dist = Vector.magnitude(Vector.sub(lasers[i].body.position, asteroids[j].body.position));
+                    if (dist < asteroids[j].radius) {
                         destroyAsteroid(j);
+                        World.remove(engine.world, lasers[i].body);
+                        worldContainer.removeChild(lasers[i].graphics);
                         lasers.splice(i, 1);
                         break;
                     }
@@ -750,10 +943,12 @@
             }
 
             // Detect Ship collisions
-            if (invulnerableTime <= 0) {
+            if (invulnerableTime <= 0 && ship.body) {
                 for (let i = 0; i < asteroids.length; i++) {
-                    if (Math.hypot(ship.x - asteroids[i].x, ship.y - asteroids[i].y) < ship.r + asteroids[i].r) {
+                    const dist = Vector.magnitude(Vector.sub(ship.body.position, asteroids[i].body.position));
+                    if (dist < SHIP_SIZE + asteroids[i].radius) {
                         handleShipHit();
+                        break;
                     }
                 }
             }
@@ -884,22 +1079,16 @@
 
             update(dt);
 
-            ctx.save();
-            if (shakeTime > 0) {
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (shakeTime > 0 && !reduceMotion) {
                 const shakeX = (Math.random() - 0.5) * 15;
                 const shakeY = (Math.random() - 0.5) * 15;
-                ctx.translate(shakeX, shakeY);
+                worldContainer.position.set(shakeX, shakeY);
                 shakeTime -= dt;
+            } else {
+                shakeTime = Math.max(0, shakeTime - dt);
+                worldContainer.position.set(0, 0);
             }
-
-            ctx.fillStyle = '#07080f';
-            ctx.fillRect(-20, -20, width + 40, height + 40);
-
-            drawShip();
-            drawLasers();
-            drawAsteroids();
-
-            ctx.restore();
 
             requestAnimationFrame(loop);
         }

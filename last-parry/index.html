@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Last Parry</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/joypad.js/dist/joypad.min.js"></script>
     <style>
         :root {
             --bg: #07080f;
@@ -132,6 +134,7 @@
 
         .touch-only { display: none; }
         .kbd-only { display: inline; }
+        .joy-only { display: none; }
 
         @media (pointer: coarse) {
             .touch-only { display: inline; }
@@ -140,6 +143,10 @@
                 grid-template-columns: 1fr;
                 gap: 1rem;
             }
+        }
+
+        .joy-connected .joy-only {
+            display: inline;
         }
 
         .hidden {
@@ -162,6 +169,7 @@
         <p class="hint" id="hint">
             <span class="touch-only">Tap anywhere</span>
             <span class="kbd-only">Press Space</span>
+            <span class="joy-only">or Button</span>
             to Parry
         </p>
         <div id="how-to" class="instructions">
@@ -283,8 +291,9 @@
         let targetTimeScale = 1;
         let slowMoTimer = 0;
         let hitStopTimer = 0;
-        let screenShake = 0;
+        let screenShake = { val: 0 };
         let parryLockout = 0;
+        let playerPulse = { val: 1 };
 
         // Gameplay Constants
         const PLAYER_RADIUS = 0.035;
@@ -306,13 +315,24 @@
         function setGameState(newState) {
             gameState = newState;
             if (gameState === STATE_START || gameState === STATE_GAMEOVER) {
-                overlayEl.classList.remove('hidden');
+                gsap.to(overlayEl, {
+                    opacity: 1,
+                    duration: 0.5,
+                    ease: "power2.out",
+                    onStart: () => overlayEl.classList.remove('hidden')
+                });
+                gsap.fromTo(titleEl,
+                    { scale: 0.8, opacity: 0 },
+                    { scale: 1, opacity: 1, duration: 0.8, ease: "elastic.out(1, 0.5)" }
+                );
+
                 titleEl.textContent = gameState === STATE_START ? 'LAST PARRY' : 'GAME OVER';
 
                 const action = gameState === STATE_START ? 'Parry' : 'Retry';
                 hintEl.innerHTML = `
                     <span class="touch-only">Tap anywhere</span>
                     <span class="kbd-only">Press Space</span>
+                    <span class="joy-only">or Button</span>
                     to ${action}
                 `;
 
@@ -324,7 +344,12 @@
                     bestEl.textContent = `BEST: ${bestScore}`;
                 }
             } else if (gameState === STATE_PLAYING) {
-                overlayEl.classList.add('hidden');
+                gsap.to(overlayEl, {
+                    opacity: 0,
+                    duration: 0.3,
+                    ease: "power2.in",
+                    onComplete: () => overlayEl.classList.add('hidden')
+                });
                 resetGame();
             }
         }
@@ -345,9 +370,14 @@
             updateUI();
         }
 
-        function updateUI() {
+        function updateUI(isPerfect = false) {
             scoreEl.textContent = Math.floor(score);
             multEl.textContent = `×${multiplier}`;
+
+            gsap.fromTo([scoreEl, multEl],
+                { scale: isPerfect ? 1.5 : 1.2 },
+                { scale: 1, duration: 0.6, ease: "elastic.out(1, 0.3)" }
+            );
         }
 
         // Visibility handling
@@ -372,12 +402,17 @@
             requestAnimationFrame(loop);
         }
 
-        function update(dt) {
-            // Screen shake decay
-            if (screenShake > 0) {
-                screenShake = Math.max(0, screenShake - dt * 0.05);
-            }
+        function applyShake(intensity) {
+            gsap.killTweensOf(screenShake);
+            screenShake.val = intensity;
+            gsap.to(screenShake, {
+                val: 0,
+                duration: 0.5,
+                ease: "power2.out"
+            });
+        }
 
+        function update(dt) {
             if (hitStopTimer > 0) {
                 hitStopTimer -= dt;
                 return;
@@ -397,11 +432,7 @@
             const effectiveDt = dt * timeScale;
             gameTime += effectiveDt;
 
-            // Update Slashes
-            for (let i = slashes.length - 1; i >= 0; i--) {
-                slashes[i].life -= dt;
-                if (slashes[i].life <= 0) slashes.splice(i, 1);
-            }
+            // Update Slashes (now handled by GSAP)
 
             if (parryLockout > 0) {
                 parryLockout -= dt;
@@ -516,13 +547,7 @@
                 if (p.life <= 0) particles.splice(i, 1);
             }
 
-            // Update feedbacks
-            for (let i = feedbacks.length - 1; i >= 0; i--) {
-                const f = feedbacks[i];
-                f.y -= 0.05 * u * (dt / 1000);
-                f.life -= dt;
-                if (f.life <= 0) feedbacks.splice(i, 1);
-            }
+            // Update feedbacks (now handled by GSAP)
         }
 
         function spawnEnemy(forceAngle = null) {
@@ -603,7 +628,7 @@
         function gameOver() {
             setGameState(STATE_GAMEOVER);
             spawnParticles(player.x, player.y, varColor('--cyan'));
-            screenShake = 15;
+            applyShake(15);
             hitStopTimer = 300;
             if (navigator.vibrate) navigator.vibrate(200);
         }
@@ -666,24 +691,28 @@
                     multiplier++;
                     score += 50 * multiplier;
                     hitStopTimer = 120;
-                    screenShake = 8;
+                    applyShake(8);
                     spawnSlash(player.x, player.y);
                     playSound(multiplier);
                     applyChainSlowMo();
                     if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
+
+                    playerPulse.val = 1.5;
+                    gsap.to(playerPulse, { val: 1, duration: 0.5, ease: "elastic.out(1, 0.3)" });
+                    updateUI(true);
                 } else {
                     multiplier = 1;
                     score += 10;
-                    screenShake = 3;
+                    applyShake(3);
                     playSound(0);
                     if (navigator.vibrate) navigator.vibrate(20);
+                    updateUI(false);
                 }
             } else {
                 multiplier = 1;
                 parryLockout = 250;
+                updateUI(false);
             }
-
-            updateUI();
         }
 
         window.addEventListener('keydown', e => {
@@ -698,13 +727,50 @@
             onParry();
         });
 
+        // Joypad.js integration
+        joypad.on('connect', (e) => {
+            document.body.classList.add('joy-connected');
+            spawnFeedback(width / 2, height / 2 + 100, 'CONTROLLER CONNECTED', varColor('--cyan'));
+        });
+
+        joypad.on('button_press', (e) => {
+            const { buttonName } = e.detail;
+            // Map face buttons (0, 1, 2, 3) to parry
+            if (['button_0', 'button_1', 'button_2', 'button_3'].includes(buttonName)) {
+                onParry();
+            }
+        });
+
         function spawnFeedback(x, y, text, color) {
-            feedbacks.push({ x, y, text, color, life: 800, maxLife: 800 });
+            const f = { x, y, text, color, life: 1, maxLife: 1 };
+            feedbacks.push(f);
+            gsap.to(f, {
+                y: y - 0.1 * u,
+                life: 0,
+                duration: 1,
+                ease: "power2.out",
+                onComplete: () => {
+                    const idx = feedbacks.indexOf(f);
+                    if (idx > -1) feedbacks.splice(idx, 1);
+                }
+            });
         }
 
         // Slash effect
         function spawnSlash(x, y) {
-            slashes.push({ x, y, life: 200 });
+            const s = { x, y, life: 200, r: player.r * 1.5 };
+            slashes.push(s);
+            gsap.to(s, {
+                life: 0,
+                r: player.r * 3.5,
+                duration: 0.3,
+                ease: "power2.out",
+                onComplete: () => {
+                    const idx = slashes.indexOf(s);
+                    if (idx > -1) slashes.splice(idx, 1);
+                }
+            });
+
             // Add sparks
             for (let i = 0; i < 25; i++) {
                 const angle = Math.random() * Math.PI * 2;
@@ -724,9 +790,9 @@
         function draw() {
             ctx.save();
 
-            if (screenShake > 0) {
-                const sx = (Math.random() - 0.5) * screenShake;
-                const sy = (Math.random() - 0.5) * screenShake;
+            if (screenShake.val > 0) {
+                const sx = (Math.random() - 0.5) * screenShake.val;
+                const sy = (Math.random() - 0.5) * screenShake.val;
                 ctx.translate(sx, sy);
             }
 
@@ -737,9 +803,9 @@
                 // Draw Slashes
                 slashes.forEach((s) => {
                     ctx.beginPath();
-                    ctx.arc(s.x, s.y, player.r * 2.5, 0, Math.PI * 2);
+                    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
                     ctx.strokeStyle = `rgba(255, 255, 255, ${s.life / 200})`;
-                    ctx.lineWidth = 4;
+                    ctx.lineWidth = 4 * (s.life / 200);
                     ctx.stroke();
                 });
 
@@ -782,9 +848,10 @@
                         ctx.shadowColor = varColor('--cyan');
                     }
 
-                    ctx.shadowBlur = 15;
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(-player.r / 1.4, -player.r / 1.4, player.r * 1.4, player.r * 1.4);
+                    ctx.shadowBlur = 15 * playerPulse.val;
+                    ctx.lineWidth = 3 * playerPulse.val;
+                    const pSize = player.r * 1.4 * playerPulse.val;
+                    ctx.strokeRect(-pSize / 2, -pSize / 2, pSize, pSize);
 
                     // Lockout indicator
                     if (parryLockout > 0) {

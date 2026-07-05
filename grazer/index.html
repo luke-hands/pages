@@ -130,11 +130,11 @@
     <div id="start-screen">
         <h1>GRAZER</h1>
         <div class="instructions">
-            <div class="instruction-line">DRAG ANYWHERE TO MOVE</div>
+            <div class="instruction-line">DRAG ANYWHERE OR USE ARROWS/WASD</div>
             <div class="instruction-line">GRAZE BULLETS FOR COMBO</div>
             <div class="instruction-line">HITBOX IS THE WHITE DOT</div>
         </div>
-        <div class="cta">TAP TO START</div>
+        <div class="cta">TAP OR SPACE TO START</div>
     </div>
 
     <script>
@@ -155,7 +155,7 @@
             y: 0,
             tx: 0,
             ty: 0,
-            coreRadius: 3,
+            coreRadius: 0,
             haloRadius: 0,
             angle: 0,
             dead: false
@@ -178,9 +178,10 @@
         let score = 0;
         let combo = 0;
         let comboTimer = 0;
+        let maxComboMilestone = 0;
         let bestScore = 0;
         try {
-            bestScore = parseInt(localStorage.getItem('grazer-best')) || 0;
+            bestScore = parseInt(localStorage.getItem('grazer-best'), 10) || 0;
             bestEl.textContent = `BEST: ${bestScore}`;
         } catch(e) {}
 
@@ -190,7 +191,6 @@
 
         const particles = [];
         const sparkPool = [];
-        const shatterPool = [];
         let screenShake = 0;
         let vignetteIntensity = 0;
 
@@ -265,18 +265,26 @@
         }
 
         function getBullet() {
-            return bulletPool.pop() || { x: 0, y: 0, vx: 0, vy: 0, r: 0.9 * u, active: false, grazed: false, trail: [] };
+            return bulletPool.pop() || {
+                x: 0, y: 0, vx: 0, vy: 0, r: 0, active: false, grazed: false,
+                trailX: new Float32Array(10),
+                trailY: new Float32Array(10),
+                trailIndex: 0,
+                trailCount: 0
+            };
         }
 
         function spawnBullet(x, y, angle, speed) {
             const b = getBullet();
             b.x = x;
             b.y = y;
+            b.r = 0.9 * u;
             b.vx = Math.cos(angle) * speed;
             b.vy = Math.sin(angle) * speed;
             b.active = true;
             b.grazed = false;
-            b.trail = [];
+            b.trailIndex = 0;
+            b.trailCount = 0;
             bullets.push(b);
         }
 
@@ -366,20 +374,36 @@
         }
 
         function resize() {
+            const oldW = width;
+            const oldH = height;
             dpr = Math.min(window.devicePixelRatio || 1, 2);
             width = window.innerWidth;
             height = window.innerHeight;
             canvas.width = width * dpr;
             canvas.height = height * dpr;
             ctx.scale(dpr, dpr);
+            const oldU = u;
             u = Math.min(width, height) / 100;
-            if (bulletSpeed === 0) bulletSpeed = 22 * u;
+
+            if (oldW && oldH) {
+                const rx = width / oldW;
+                const ry = height / oldH;
+                ship.x *= rx;
+                ship.y *= ry;
+                ship.tx *= rx;
+                ship.ty *= ry;
+                bulletSpeed *= (u / oldU);
+            } else {
+                bulletSpeed = 22 * u;
+            }
+
+            ship.coreRadius = 0.6 * u;
+            ship.haloRadius = 5.5 * u;
         }
 
         window.addEventListener('resize', () => {
             resize();
-            ship.x = ship.tx = width / 2;
-            ship.y = ship.ty = height / 2;
+            initEmitters();
         });
         resize();
         ship.x = ship.tx = width / 2;
@@ -408,6 +432,7 @@
             score = 0;
             combo = 0;
             comboTimer = 0;
+            maxComboMilestone = 0;
             bulletTimeTimer = 0;
             hitStopTimer = 0;
             screenShake = 0;
@@ -444,6 +469,7 @@
 
         window.addEventListener('pointerdown', e => {
             initAudio();
+            if (audioCtx) audioCtx.resume();
             if (!gameStarted) {
                 gameStarted = true;
                 startScreenEl.style.display = 'none';
@@ -463,10 +489,23 @@
             if (e.cancelable) e.preventDefault();
         }, { passive: false });
 
+        const keys = {};
         window.addEventListener('keydown', e => {
+            initAudio();
+            if (audioCtx) audioCtx.resume();
+            keys[e.code] = true;
             if (e.code === 'Space') {
+                if (!gameStarted) {
+                    gameStarted = true;
+                    startScreenEl.style.display = 'none';
+                    lastTime = performance.now();
+                }
                 if (ship.dead) restart();
             }
+        });
+
+        window.addEventListener('keyup', e => {
+            keys[e.code] = false;
         });
 
         document.addEventListener('visibilitychange', () => {
@@ -498,6 +537,24 @@
 
         function update(dt) {
             if (!gameStarted) return;
+
+            // Keyboard movement
+            const moveSpeed = 60 * u * dt;
+            let kdx = 0;
+            let kdy = 0;
+            if (keys['ArrowLeft'] || keys['KeyA']) kdx -= 1;
+            if (keys['ArrowRight'] || keys['KeyD']) kdx += 1;
+            if (keys['ArrowUp'] || keys['KeyW']) kdy -= 1;
+            if (keys['ArrowDown'] || keys['KeyS']) kdy += 1;
+
+            if (kdx !== 0 || kdy !== 0) {
+                const mag = Math.hypot(kdx, kdy);
+                ship.tx += (kdx / mag) * moveSpeed;
+                ship.ty += (kdy / mag) * moveSpeed;
+                ship.tx = Math.max(0, Math.min(width, ship.tx));
+                ship.ty = Math.max(0, Math.min(height, ship.ty));
+            }
+
             if (hitStopTimer > 0) {
                 hitStopTimer -= dt;
                 return;
@@ -543,19 +600,19 @@
 
             // Combo decay
             if (comboTimer > 0) {
-                const prevTimer = comboTimer;
-                comboTimer -= dt;
+                comboTimer -= gameDt;
 
                 // Continuous drain instead of cliff-drop
                 // Decay combo based on timer progress
                 if (combo > 0) {
                     const decayRate = combo / 1.5;
-                    combo -= decayRate * dt;
+                    combo -= decayRate * gameDt;
                 }
 
                 if (comboTimer <= 0) {
                     combo = 0;
                     comboTimer = 0;
+                    maxComboMilestone = 0;
                 }
             }
 
@@ -565,8 +622,10 @@
                 b.x += b.vx * gameDt;
                 b.y += b.vy * gameDt;
 
-                b.trail.push({ x: b.x, y: b.y });
-                if (b.trail.length > 10) b.trail.shift();
+                b.trailX[b.trailIndex] = b.x;
+                b.trailY[b.trailIndex] = b.y;
+                b.trailIndex = (b.trailIndex + 1) % 10;
+                if (b.trailCount < 10) b.trailCount++;
 
                 if (b.x < -100 || b.x > width + 100 || b.y < -100 || b.y > height + 100) {
                     b.active = false;
@@ -583,15 +642,16 @@
                 // Graze
                 else if (!b.grazed && dist < b.r + ship.haloRadius) {
                     b.grazed = true;
-                    const oldCombo = Math.floor(combo);
                     combo++;
                     const newCombo = Math.floor(combo);
                     comboTimer = 1.5;
                     score += 10 * newCombo;
                     scoreEl.textContent = Math.floor(score);
 
-                    if (newCombo > 0 && newCombo % 20 === 0 && newCombo !== oldCombo) {
+                    const milestone = Math.floor(newCombo / 20) * 20;
+                    if (milestone > 0 && milestone > maxComboMilestone) {
                         bulletTimeTimer = 2;
+                        maxComboMilestone = milestone;
                     }
 
                     spawnSparks(b.x, b.y, Math.atan2(b.vy, b.vx), 10);
@@ -612,8 +672,6 @@
             if (Math.hypot(dx, dy) > 0.1) {
                 ship.angle = Math.atan2(dy, dx);
             }
-
-            ship.haloRadius = 5.5 * u;
 
             // Vignette intensity based on nearest bullet
             let minDist = Infinity;
@@ -701,8 +759,9 @@
                 const b = bullets[i];
                 ctx.beginPath();
                 ctx.moveTo(b.x, b.y);
-                for (let j = b.trail.length - 1; j >= 0; j--) {
-                    ctx.lineTo(b.trail[j].x, b.trail[j].y);
+                for (let j = 0; j < b.trailCount; j++) {
+                    const idx = (b.trailIndex - 1 - j + 10) % 10;
+                    ctx.lineTo(b.trailX[idx], b.trailY[idx]);
                 }
                 ctx.strokeStyle = ghost ? ghostColor : (i % 2 === 0 ? '#7c6cff' : '#46c8ff');
                 ctx.lineWidth = b.r * 2;

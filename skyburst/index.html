@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Skyburst</title>
     <style>
         :root {
@@ -106,7 +106,7 @@
         </div>
     </div>
 
-    <canvas id="canvas"></canvas>
+    <canvas id="canvas" aria-label="Skyburst: Endless comet climber game" role="img"></canvas>
 
     <script>
         const canvas = document.getElementById('canvas');
@@ -122,10 +122,14 @@
         let altitude = 0;
         let bestAltitude = 0;
         let stealMultiplier = 1;
+        let lastStealTime = 0;
         let shake = 0;
         let hitStop = 0;
         let flash = 0;
         let history = []; // for chasing bursts
+        let gameOverTimeout = null;
+        let burstTimeouts = [];
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
         const COLORS = ['#7c6cff', '#46c8ff', '#ff6ec7'];
 
@@ -134,6 +138,9 @@
         function initAudio() {
             if (audioCtx) return;
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
         }
 
         function playPop() {
@@ -208,17 +215,21 @@
                 ctx.globalCompositeOperation = 'lighter';
 
                 // Trail
-                ctx.beginPath();
-                this.trail.forEach((p, i) => {
-                    const ratio = i / this.trail.length;
-                    const size = ratio * this.radius;
-                    ctx.lineTo(p.x, p.y);
-                    ctx.lineWidth = size * 2;
-                    ctx.strokeStyle = `rgba(255, 255, 255, ${ratio * 0.4})`;
-                    ctx.stroke();
+                if (this.trail.length > 1) {
                     ctx.beginPath();
-                    ctx.moveTo(p.x, p.y);
-                });
+                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                    for (let i = 1; i < this.trail.length; i++) {
+                        const p = this.trail[i];
+                        const ratio = i / this.trail.length;
+                        const size = ratio * this.radius;
+                        ctx.lineTo(p.x, p.y);
+                        ctx.lineWidth = size * 2;
+                        ctx.strokeStyle = `rgba(255, 255, 255, ${ratio * 0.4})`;
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(p.x, p.y);
+                    }
+                }
 
                 // Comet head
                 ctx.beginPath();
@@ -236,7 +247,7 @@
                 this.id = Math.random();
                 this.x = Math.random() * width;
                 this.y = height + 50;
-                this.speed = height * 1.2;
+                this.speed = height * (1.2 + Math.min(altitude / 10000, 0.5));
                 this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
                 this.life = 1.5 + Math.random() * 1.5;
                 this.maxLife = this.life;
@@ -360,8 +371,8 @@
 
         function spawnBurst(x, y, color, type) {
             playPop();
-            shake = Math.max(shake, 5);
-            const count = 16 + Math.floor(Math.random() * 16) * (1 + Math.min(altitude / 3000, 1) * 0.25);
+            if (!prefersReducedMotion) shake = Math.max(shake, 5);
+            const count = Math.floor((16 + Math.floor(Math.random() * 16)) * (1 + Math.min(altitude / 3000, 1) * 0.25));
             const speed = height * 0.35 * (1 + Math.min(altitude / 3000, 1) * 0.08);
 
             if (type === 'ring') {
@@ -406,6 +417,8 @@
             height = window.innerHeight;
             canvas.width = width * dpr;
             canvas.height = height * dpr;
+            canvas.style.width = width + 'px';
+            canvas.style.height = height + 'px';
             ctx.scale(dpr, dpr);
         }
 
@@ -417,7 +430,10 @@
         initStars();
 
         const keys = {};
-        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if (!gameActive) start();
+        });
         window.addEventListener('keyup', e => keys[e.code] = false);
 
         const TOUCH_OFFSET = 60;
@@ -443,14 +459,13 @@
         });
 
         window.addEventListener('pointerdown', e => {
+            if (!gameActive) {
+                start();
+                isTouchOffsetApplied = false;
+            }
             if (e.pointerType !== 'mouse') {
                 touchStartX = e.clientX;
                 touchStartY = e.clientY;
-
-                if (!gameActive) {
-                    start();
-                    isTouchOffsetApplied = false;
-                }
 
                 cometStartX = comet.targetX;
                 cometStartY = comet.targetY + (isTouchOffsetApplied ? TOUCH_OFFSET : 0);
@@ -458,9 +473,6 @@
                 // Immediate jump for better responsiveness
                 comet.targetY = cometStartY - TOUCH_OFFSET;
                 isTouchOffsetApplied = true;
-            } else {
-                start();
-                isTouchOffsetApplied = false;
             }
         });
 
@@ -489,6 +501,11 @@
             if (keys['ArrowDown'] || keys['KeyS']) comet.targetY += kSpeed * dt;
 
             comet.update(dt);
+
+            // Multiplier decay
+            if (performance.now() - lastStealTime > 5000) {
+                stealMultiplier = 1;
+            }
 
             // Save history for chasing bursts (store world position)
             history.push({
@@ -521,6 +538,7 @@
                     s.dead = true;
                     altitude += 250 * stealMultiplier;
                     stealMultiplier++;
+                    lastStealTime = performance.now();
                     flash = 0.08;
                     hitStop = 0.09;
                     shake = 10;
@@ -537,12 +555,15 @@
                     const worldY = bestP.y;
                     const worldX = bestP.x;
 
-                    setTimeout(() => {
+                    const bt = setTimeout(() => {
+                        // Remove from tracking array
+                        burstTimeouts = burstTimeouts.filter(id => id !== bt);
                         if (!gameActive) return;
                         // Calculate current screen Y from world Y
                         const currentScreenY = worldY + altitude * (scrollSpeed / climbRate);
                         spawnBurst(worldX, currentScreenY, s.color, 'ring');
                     }, 2500);
+                    burstTimeouts.push(bt);
                 }
             });
 
@@ -615,7 +636,7 @@
             <span style="font-size: 16px; font-weight: normal; color: #8a90a6;">tap or press any key to try again</span>`;
 
             // Short delay before allowing restart to prevent accidental double-tap
-            setTimeout(() => {
+            gameOverTimeout = setTimeout(() => {
                 overlayEl.classList.remove('hidden');
             }, 500);
         }
@@ -625,7 +646,7 @@
             ctx.fillRect(0, 0, width, height);
 
             ctx.save();
-            if (shake > 0) {
+            if (shake > 0 && !prefersReducedMotion) {
                 ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
             }
 
@@ -644,7 +665,7 @@
 
             ctx.restore();
 
-            if (flash > 0) {
+            if (flash > 0 && !prefersReducedMotion) {
                 ctx.fillStyle = `rgba(255, 255, 255, ${flash * 10})`;
                 ctx.fillRect(0, 0, width, height);
             }
@@ -667,16 +688,20 @@
             initAudio();
             gameActive = true;
             overlayEl.classList.add('hidden');
+
+            clearTimeout(gameOverTimeout);
+            burstTimeouts.forEach(t => clearTimeout(t));
+            burstTimeouts = [];
+
             altitude = 0;
             stealMultiplier = 1;
+            lastStealTime = performance.now();
             shells = [];
             fragments = [];
             sparkles = [];
             history = [];
             comet.reset();
         }
-
-        window.addEventListener('keydown', start);
 
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {

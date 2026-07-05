@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Last Light</title>
     <style>
         :root {
@@ -153,11 +153,13 @@
         const deathScreen = document.getElementById('death-screen');
         const pauseScreen = document.getElementById('pause-screen');
         const finalScoreText = document.getElementById('final-score-text');
+        const finalBestText = document.getElementById('final-best-text');
 
         let width, height, dpr, u;
         let lastTime = 0, gameActive = false, paused = false, firstLaunch = true;
         let gameTime = 0, spawnTimer = 0, screenShake = 0, hitStop = 0;
-        let nearestDist = 1000, audioCtx = null, heartbeatNode = null;
+        let nearestDist = 1000, audioCtx = null;
+        const CACHED = { beamGrad: null, vigGrad: null, lastW: 0, lastH: 0 };
 
         const STATE = {
             score: 0, best: 0, beamAngle: 0, targetAngle: 0, beamWidth: 50 * Math.PI / 180,
@@ -171,7 +173,7 @@
             TANK: { color: '#8b00ff', speed: 3, burnRate: 1/1.5, pts: 5, size: 3, visibleUnlit: true }
         };
 
-        try { STATE.best = parseInt(localStorage.getItem('lastlight-best')) || 0; bestEl.textContent = `Best: ${STATE.best}`; } catch (e) {}
+        try { STATE.best = parseInt(localStorage.getItem('lastlight-best'), 10) || 0; bestEl.textContent = `Best: ${STATE.best}`; } catch (e) {}
 
         function resize() {
             dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -179,46 +181,55 @@
             canvas.width = width * dpr; canvas.height = height * dpr;
             ctx.scale(dpr, dpr);
             u = Math.min(width, height) / 100;
-            STATE.motes = Array.from({ length: 40 }, () => ({
-                x: Math.random() * width, y: Math.random() * height,
-                vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, s: Math.random() * 0.5 + 0.2
-            }));
+
+            if (width !== CACHED.lastW || height !== CACHED.lastH) {
+                STATE.motes = Array.from({ length: 40 }, () => ({
+                    x: Math.random() * width, y: Math.random() * height,
+                    vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, s: Math.random() * 0.5 + 0.2
+                }));
+                CACHED.lastW = width; CACHED.lastH = height;
+            }
+
+            const beamRadius = Math.max(width, height);
+            CACHED.beamGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, beamRadius);
+            CACHED.beamGrad.addColorStop(0, 'rgba(255, 220, 150, 0.4)');
+            CACHED.beamGrad.addColorStop(0.5, 'rgba(255, 220, 150, 0.15)');
+            CACHED.beamGrad.addColorStop(1, 'rgba(255, 220, 150, 0)');
+
+            CACHED.vigGrad = ctx.createRadialGradient(0, 0, 20 * u, 0, 0, 60 * u);
+            CACHED.vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+            CACHED.vigGrad.addColorStop(1, 'rgba(0,0,0,1)');
         }
         window.addEventListener('resize', resize);
         resize();
 
         function initAudio() {
             if (audioCtx) return;
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            heartbeatNode = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            heartbeatNode.type = 'sine';
-            heartbeatNode.frequency.setValueAtTime(50, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0, audioCtx.currentTime);
-            heartbeatNode.connect(gain);
-            gain.connect(audioCtx.destination);
-            heartbeatNode.start();
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-            // We'll use a manual interval for heartbeat to easily scale BPM
-            let lastHeartbeat = 0;
-            const playHeartbeat = () => {
-                if (!gameActive || paused) { setTimeout(playHeartbeat, 500); return; }
-                const bpm = 50 + (1 - Math.min(1, nearestDist / 50)) * 100;
-                const interval = 60000 / bpm;
+                // We'll use a manual interval for heartbeat to easily scale BPM
+                const playHeartbeat = () => {
+                    if (!gameActive || paused) { setTimeout(playHeartbeat, 500); return; }
+                    const bpm = 50 + (1 - Math.min(1, nearestDist / 50)) * 100;
+                    const interval = 60000 / bpm;
 
-                const osc = audioCtx.createOscillator();
-                const g = audioCtx.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(60, audioCtx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.1);
-                g.gain.setValueAtTime(0.3, audioCtx.currentTime);
-                g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-                osc.connect(g); g.connect(audioCtx.destination);
-                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+                    const osc = audioCtx.createOscillator();
+                    const g = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(60, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.1);
+                    g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                    g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                    osc.connect(g); g.connect(audioCtx.destination);
+                    osc.start(); osc.stop(audioCtx.currentTime + 0.1);
 
-                setTimeout(playHeartbeat, interval);
-            };
-            playHeartbeat();
+                    setTimeout(playHeartbeat, interval);
+                };
+                playHeartbeat();
+            } catch (e) {
+                console.warn("Audio Context creation failed:", e);
+            }
         }
 
         function playSound(freq, type, dur, vol) {
@@ -236,12 +247,17 @@
         const keys = {};
         window.addEventListener('keydown', e => {
             keys[e.code] = true;
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
             if (e.code === 'Space') handleAction();
             if (e.code === 'KeyP') togglePause();
             if (paused && e.code !== 'KeyP') togglePause();
         });
         window.addEventListener('keyup', e => keys[e.code] = false);
         canvas.addEventListener('mousemove', e => updateTargetAngle(e.clientX, e.clientY));
+        window.addEventListener('pointerdown', e => {
+            handleAction();
+            if (paused) togglePause();
+        });
         canvas.addEventListener('touchstart', e => {
             e.preventDefault();
             initAudio();
@@ -295,7 +311,7 @@
                 try { localStorage.setItem('lastlight-best', STATE.best); } catch(e) {}
             }
             bestEl.textContent = `Best: ${STATE.best}`;
-            document.getElementById('final-best-text').textContent = `Best: ${STATE.best}`;
+            finalBestText.textContent = `Best: ${STATE.best}`;
             playSound(100, 'sawtooth', 0.5, 0.2); // Death rumble
         }
 
@@ -322,15 +338,15 @@
         }
 
         function update(dt) {
+            if (paused) return;
+            if (hitStop > 0 && gameActive) { hitStop -= dt; return; }
+
             if (!gameActive) {
                 if (STATE.beamCollapse > 0) STATE.beamCollapse = Math.max(0, STATE.beamCollapse - dt / 0.6);
-                return;
+            } else {
+                gameTime += dt;
             }
-            if (paused) return;
 
-            if (hitStop > 0) { hitStop -= dt; return; }
-
-            gameTime += dt;
             screenShake = Math.max(0, screenShake - dt * 10);
             STATE.beamRecoil = Math.max(0, STATE.beamRecoil - dt * 10);
 
@@ -356,6 +372,8 @@
                 p.x += p.vx * dt * 20; p.y += p.vy * dt * 20; p.life -= dt * 1.5;
                 if (p.life <= 0) STATE.particles.splice(i, 1);
             }
+
+            if (!gameActive) return;
 
             const spawnInterval = Math.max(0.45, 2.0 - (gameTime / 180) * (2.0 - 0.45));
             spawnTimer += dt;
@@ -384,12 +402,17 @@
                 if (e.burn >= 1) {
                     STATE.score += e.pts; scoreEl.textContent = STATE.score;
                     spawnParticles(e.x, e.y, e.color, 15, 2);
-                    screenShake += 0.5; STATE.beamRecoil += 1.5;
+                    screenShake = Math.min(5, screenShake + 0.5);
+                    STATE.beamRecoil = Math.min(10, STATE.beamRecoil + 1.5);
                     playSound(400 + Math.random() * 200, 'square', 0.05, 0.05); // Crackle
                     if (e.type === 'SPLITTER' || e.type === 'TANK') hitStop = 0.04;
                     if (e.type === 'SPLITTER') {
                         const baseAngle = Math.atan2(height/2 - e.y, width/2 - e.x);
-                        [1, -1].forEach(side => { STATE.enemies.push({ type: 'MOTH', x: e.x + Math.cos(baseAngle + Math.PI/2) * side * u, y: e.y + Math.sin(baseAngle + Math.PI/2) * side * u, burn: 0, wobble: Math.random() * Math.PI * 2, ...ENEMY_TYPES.MOTH }); });
+                        [1, -1].forEach(side => {
+                            if (STATE.enemies.length < 28) {
+                                STATE.enemies.push({ type: 'MOTH', x: e.x + Math.cos(baseAngle + Math.PI/2) * side * u, y: e.y + Math.sin(baseAngle + Math.PI/2) * side * u, burn: 0, wobble: Math.random() * Math.PI * 2, ...ENEMY_TYPES.MOTH });
+                            }
+                        });
                     }
                     STATE.enemies.splice(i, 1); continue;
                 }
@@ -415,15 +438,13 @@
             ctx.save();
             ctx.translate(cx, cy);
             ctx.rotate(STATE.beamAngle + (Math.random()-0.5) * STATE.beamRecoil * Math.PI / 180);
+            ctx.globalAlpha = STATE.beamCollapse;
+            ctx.fillStyle = CACHED.beamGrad;
             const beamRadius = Math.max(width, height);
-            const grad = ctx.createRadialGradient(0,0,0,0,0,beamRadius);
-            grad.addColorStop(0, `rgba(255, 220, 150, ${0.4 * STATE.beamCollapse})`);
-            grad.addColorStop(0.5, `rgba(255, 220, 150, ${0.15 * STATE.beamCollapse})`);
-            grad.addColorStop(1, 'rgba(255, 220, 150, 0)');
-            ctx.fillStyle = grad;
             ctx.beginPath(); ctx.moveTo(0,0);
             ctx.arc(0,0, beamRadius, -STATE.beamWidth/2 * STATE.beamCollapse, STATE.beamWidth/2 * STATE.beamCollapse);
             ctx.fill();
+            ctx.globalAlpha = 1;
             ctx.restore();
 
             STATE.particles.forEach(p => {
@@ -439,9 +460,12 @@
                 if (!inBeam && e.visibleUnlit) alpha = 0.15;
                 if (!inBeam && Math.random() < 0.01) alpha = 0.2;
                 ctx.globalAlpha = alpha; ctx.fillStyle = e.color;
-                if (inBeam) { ctx.shadowBlur = 10; ctx.shadowColor = e.color; }
+                if (inBeam) {
+                    ctx.beginPath(); ctx.arc(e.x, e.y, e.size * u * 1.8, 0, Math.PI * 2);
+                    ctx.globalAlpha = alpha * 0.3; ctx.fill();
+                    ctx.globalAlpha = alpha;
+                }
                 ctx.beginPath(); ctx.arc(e.x, e.y, e.size * u, 0, Math.PI * 2); ctx.fill();
-                ctx.shadowBlur = 0;
             });
             ctx.globalAlpha = 1;
 
@@ -450,12 +474,15 @@
             ctx.shadowBlur = 0;
 
             // Vignette
-            const vigGrad = ctx.createRadialGradient(cx, cy, 20 * u, cx, cy, 60 * u);
             const vigIntensity = Math.min(0.8, (1 - Math.min(1, nearestDist / 60)) * 0.8);
-            vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
-            vigGrad.addColorStop(1, `rgba(0,0,0,${vigIntensity})`);
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(0, 0, width, height);
+            if (vigIntensity > 0) {
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.globalAlpha = vigIntensity;
+                ctx.fillStyle = CACHED.vigGrad;
+                ctx.fillRect(-cx, -cy, width, height);
+                ctx.restore();
+            }
 
             ctx.restore();
         }

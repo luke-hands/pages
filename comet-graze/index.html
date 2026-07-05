@@ -220,8 +220,9 @@
 
   let width, height, dpr;
   let score = 0, bestScore = 0;
+  let prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let gameActive = false, gameOver = false, paused = false;
-  let lastTime = 0, runStartTime = 0, hitStop = 0;
+  let lastTime = 0, gameElapsed = 0, vTime = 0, hitStop = 0;
   let isPressing = false;
   let dieTimeout = null;
 
@@ -248,6 +249,16 @@
   };
 
   let scrollX = 0, scrollSpeed = 0.45, gapHeight = 0.34, caveParams = [];
+
+  const COLORS = ['#7c6cff', '#46c8ff', '#46c8ff', '#ff6ec7', '#ffffff'];
+  const UI = {
+    score: document.getElementById('current-score'),
+    best: document.getElementById('best-score'),
+    multText: document.getElementById('multiplier-text'),
+    meter: document.getElementById('meter-fill'),
+    restart: document.getElementById('restart-prompt'),
+    start: document.getElementById('start-screen')
+  };
 
   let audioCtx;
   function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
@@ -282,7 +293,7 @@
   try {
     const saved = localStorage.getItem('comet-graze-best');
     if (saved) bestScore = parseInt(saved, 10) || 0;
-    document.getElementById('best-score').textContent = `Best: ${bestScore}`;
+    UI.best.textContent = `Best: ${bestScore}`;
   } catch (e) {}
 
   function resize() {
@@ -313,13 +324,13 @@
   }
   function handleUp(e) { if (e) e.preventDefault(); isPressing = false; }
 
-  window.addEventListener('keydown', (e) => { if (e.code === 'Space') handleDown(e); });
+  window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat) handleDown(e); });
   window.addEventListener('keyup', (e) => { if (e.code === 'Space') handleUp(e); });
   window.addEventListener('mousedown', (e) => { if (e.button === 0) handleDown(e); });
   window.addEventListener('mouseup', (e) => { if (e.button === 0) handleUp(e); });
   canvas.addEventListener('touchstart', handleDown, {passive: false});
-  canvas.addEventListener('touchend', handleUp, {passive: false});
-  canvas.addEventListener('touchcancel', handleUp, {passive: false});
+  canvas.addEventListener('touchend', (e) => { if (e.touches.length === 0) handleUp(e); }, {passive: false});
+  canvas.addEventListener('touchcancel', (e) => { if (e.touches.length === 0) handleUp(e); }, {passive: false});
 
   function startGame() {
     if (dieTimeout) { clearTimeout(dieTimeout); dieTimeout = null; }
@@ -329,23 +340,20 @@
     trailCount = 0; trailIdx = 0;
     particles.active.fill(0); shatters.active.fill(0);
     initCave();
-    lastTime = performance.now(); runStartTime = lastTime;
+    lastTime = performance.now(); gameElapsed = 0;
 
-    const prompt = document.getElementById('restart-prompt');
-    prompt.classList.remove('visible');
-
-    const startScreen = document.getElementById('start-screen');
-    startScreen.classList.add('hidden');
+    UI.restart.classList.remove('visible');
+    UI.start.classList.add('hidden');
 
     updateUI();
-    requestAnimationFrame(loop);
   }
 
   function loop(t) {
     let dt = Math.min((t - lastTime) / 1000, 0.1);
     lastTime = t;
     if (paused) { requestAnimationFrame(loop); return; }
-    if (hitStop > 0) { hitStop--; requestAnimationFrame(loop); return; }
+    vTime += dt;
+    if (hitStop > 0) { hitStop -= dt; requestAnimationFrame(loop); return; }
     if (gameOver) {
         dt *= 0.25;
         for (let i = 0; i < MAX_PARTICLES; i++) {
@@ -365,10 +373,10 @@
       scrollX += scrollSpeed * dt;
       return;
     }
-    const elapsed = (performance.now() - runStartTime) / 1000;
-    scrollSpeed = 0.45 * Math.pow(1.015, Math.floor(elapsed / 5));
+    gameElapsed += dt;
+    scrollSpeed = 0.45 * Math.pow(1.015, Math.floor(gameElapsed / 5));
     scrollSpeed = Math.min(scrollSpeed, 0.85);
-    gapHeight = 0.34 - (0.34 - 0.17) * Math.min(elapsed / 90, 1);
+    gapHeight = 0.34 - (0.34 - 0.17) * Math.min(gameElapsed / 90, 1);
     scrollX += scrollSpeed * dt;
     player.vy += (isPressing ? DIVE_ACCEL : CLIMB_ACCEL) * dt;
     player.vy = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, player.vy));
@@ -381,7 +389,7 @@
         if (player.grazeMeter >= 1.2) {
             if (player.multiplierIdx < MULTIPLIERS.length - 1) {
                 player.multiplierIdx++; player.multiplier = MULTIPLIERS[player.multiplierIdx];
-                player.grazeMeter = 0; hitStop = 2; playBleep(player.multiplierIdx);
+                player.grazeMeter = 0; hitStop = 0.033; playBleep(player.multiplierIdx);
             } else player.grazeMeter = 1.2;
         }
         if (Math.random() > 0.3) spawnParticle(PLAYER_X_PCT, (Math.abs((player.y - player.radius) - tw) < GRAZE_BAND ? tw : bw));
@@ -416,12 +424,11 @@
   }
 
   function updateUI() {
-    document.getElementById('current-score').textContent = `Score: ${Math.floor(score)}`;
-    document.getElementById('multiplier-text').textContent = `${player.multiplier}x`;
-    document.getElementById('meter-fill').style.width = `${(player.grazeMeter / 1.2) * 100}%`;
-    const colors = ['#7c6cff', '#46c8ff', '#46c8ff', '#ff6ec7', '#ffffff'];
-    document.getElementById('multiplier-text').style.color = colors[player.multiplierIdx];
-    document.getElementById('meter-fill').style.backgroundColor = colors[player.multiplierIdx];
+    UI.score.textContent = `Score: ${Math.floor(score)}`;
+    UI.multText.textContent = `${player.multiplier}x`;
+    UI.meter.style.width = `${(player.grazeMeter / 1.2) * 100}%`;
+    UI.multText.style.color = COLORS[player.multiplierIdx];
+    UI.meter.style.backgroundColor = COLORS[player.multiplierIdx];
   }
 
   function die() {
@@ -433,24 +440,22 @@
         shatters.r[i] = Math.random() * 0.01 + 0.005; shatters.life[i] = 1.0; shatters.active[i] = 1;
     }
     dieTimeout = setTimeout(() => {
-        const prompt = document.getElementById('restart-prompt');
-        prompt.classList.add('visible');
+        UI.restart.classList.add('visible');
         dieTimeout = null;
     }, 600);
     if (score > bestScore) {
-        bestScore = Math.floor(score); document.getElementById('best-score').textContent = `Best: ${bestScore}`;
+        bestScore = Math.floor(score); UI.best.textContent = `Best: ${bestScore}`;
         try { localStorage.setItem('comet-graze-best', bestScore); } catch (e) {}
     }
   }
 
   function draw() {
     ctx.fillStyle = '#07080f'; ctx.fillRect(0, 0, width, height);
-    const pulse = 1 + 0.03 * Math.sin(((performance.now() - runStartTime) / 1000) * Math.PI * 4);
-    ctx.save(); if (gameOver) ctx.translate(Math.random() * 10 - 5, Math.random() * 10 - 5);
+    const pulse = prefersReducedMotion ? 1 : 1 + 0.03 * Math.sin(vTime * Math.PI * 4);
+    ctx.save(); if (gameOver && !prefersReducedMotion) ctx.translate(Math.random() * 10 - 5, Math.random() * 10 - 5);
     if (caveParams.length > 0) drawCave(pulse);
     if (gameActive) {
-        const colors = ['#7c6cff', '#46c8ff', '#46c8ff', '#ff6ec7', '#ffffff'];
-        ctx.strokeStyle = colors[player.multiplierIdx]; ctx.lineWidth = height * player.radius * 1.5; ctx.lineCap = 'round';
+        ctx.strokeStyle = COLORS[player.multiplierIdx]; ctx.lineWidth = height * player.radius * 1.5; ctx.lineCap = 'round';
         ctx.beginPath();
         for (let i = 0; i < trailCount; i++) {
             const idx = (trailIdx - trailCount + i + MAX_TRAIL) % MAX_TRAIL;

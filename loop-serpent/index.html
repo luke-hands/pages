@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Loop Serpent — Luke Hands</title>
     <style>
         :root {
@@ -205,7 +205,7 @@
         // Score State
         let score = 0;
         let multiplier = 1;
-        let bestScore = parseInt(localStorage.getItem('loop-serpent-best')) || 0;
+        let bestScore = parseInt(localStorage.getItem('loop-serpent-best'), 10) || 0;
 
         // Visuals State
         let particles = [];
@@ -244,6 +244,26 @@
             canvas.width = width * dpr;
             canvas.height = height * dpr;
             ctx.scale(dpr, dpr);
+
+            // Rescale serpent params
+            serpent.speed = 0.28 * minDim;
+            serpent.maxLength = 1.4 * minDim;
+            serpent.pointSpacing = 0.005 * minDim;
+
+            // Clamp positions to prevent instant death on rotation
+            const inset = minDim * 0.02;
+            if (serpent.headX) {
+                serpent.headX = Math.max(inset, Math.min(width - inset, serpent.headX));
+                serpent.headY = Math.max(inset, Math.min(height - inset, serpent.headY));
+            }
+            prey.forEach(p => {
+                p.x = Math.max(inset, Math.min(width - inset, p.x));
+                p.y = Math.max(inset, Math.min(height - inset, p.y));
+            });
+            hunters.forEach(h => {
+                h.x = Math.max(0, Math.min(width, h.x));
+                h.y = Math.max(0, Math.min(height, h.y));
+            });
         }
 
         window.addEventListener('resize', resize);
@@ -267,8 +287,8 @@
 
             prey.push({
                 x, y,
-                vx: (Math.random() - 0.5) * 0.05 * minDim,
-                vy: (Math.random() - 0.5) * 0.05 * minDim,
+                vx: (Math.random() - 0.5) * 3 * minDim,
+                vy: (Math.random() - 0.5) * 3 * minDim,
                 radius: 4
             });
         }
@@ -333,11 +353,24 @@
             document.getElementById('hud').style.display = 'flex';
             gameOverEl.style.display = 'none';
             lastTime = performance.now();
-            requestAnimationFrame(loop);
         }
 
         function update(dt) {
-            if (!gameActive || paused) return;
+            if (paused) return;
+
+            if (gameActive) {
+                // Difficulty Curve
+                const elapsed = (performance.now() - startTime) / 1000;
+                const diffMult = 1.0 + Math.min(0.5, elapsed / 120);
+                serpent.speed = 0.28 * minDim * diffMult;
+            }
+
+            // Always update visuals
+            updateVisuals(dt);
+            // Update Entities (prey wander even on start screen)
+            updateEntities(dt);
+
+            if (!gameActive) return;
 
             if (hitStop > 0) {
                 hitStop -= dt * 1000;
@@ -403,11 +436,6 @@
             // Loop Detection
             checkLoop();
 
-            // Update Entities
-            updateEntities(dt);
-
-            // Update Visuals
-            updateVisuals(dt);
         }
 
         function updateVisuals(dt) {
@@ -449,8 +477,9 @@
         function updateEntities(dt) {
             const now = (performance.now() - startTime) / 1000;
 
-            // Hunters Spawning
-            if (now > 10 && now - lastHunterSpawn > 15) {
+            // Hunters Spawning (cadence increases over time)
+            const hunterInterval = Math.max(8, 15 - (now / 60) * 2);
+            if (now > 10 && now - lastHunterSpawn > hunterInterval) {
                 spawnHunter();
                 lastHunterSpawn = now;
             }
@@ -458,12 +487,12 @@
             // Update Prey
             prey.forEach(p => {
                 // Wander
-                p.vx += (Math.random() - 0.5) * 10 * dt;
-                p.vy += (Math.random() - 0.5) * 10 * dt;
+                p.vx += (Math.random() - 0.5) * 600 * dt;
+                p.vy += (Math.random() - 0.5) * 600 * dt;
 
-                // Limit speed to 5% minDim
+                // Limit speed to 300% minDim per second (effectively 5% per frame at 60fps)
                 const speed = Math.hypot(p.vx, p.vy);
-                const maxSpeed = 0.05 * minDim;
+                const maxSpeed = 3.0 * minDim;
                 if (speed > maxSpeed) {
                     p.vx = (p.vx / speed) * maxSpeed;
                     p.vy = (p.vy / speed) * maxSpeed;
@@ -474,17 +503,18 @@
                 const dy = p.y - serpent.headY;
                 const dist = Math.hypot(dx, dy);
                 if (dist < minDim * 0.2) {
-                    const force = (1 - dist / (minDim * 0.2)) * 50;
+                    const force = (1 - dist / (minDim * 0.2)) * 3000;
                     p.vx += (dx / dist) * force * dt;
                     p.vy += (dy / dist) * force * dt;
                 }
 
-                // Drag
-                p.vx *= 0.98;
-                p.vy *= 0.98;
+                // Drag (approximated for dt)
+                const drag = Math.pow(0.28, dt);
+                p.vx *= drag;
+                p.vy *= drag;
 
-                p.x += p.vx;
-                p.y += p.vy;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
 
                 // Arena bounce
                 const inset = minDim * 0.02;
@@ -580,7 +610,7 @@
                 maxY = Math.max(maxY, p.y);
             });
 
-            for (let i = 0; i < 300; i++) {
+            for (let i = 0; i < 100; i++) {
                 const x = Math.random() * (maxX - minX) + minX;
                 const y = Math.random() * (maxY - minY) + minY;
                 if (isPointInPolygon(x, y, polygon)) {
@@ -770,9 +800,7 @@
             update(dt);
             draw();
 
-            if (gameActive) {
-                requestAnimationFrame(loop);
-            }
+            requestAnimationFrame(loop);
         }
 
         // Inputs
@@ -851,11 +879,14 @@
             serpent.angle = -Math.PI / 2;
             serpent.trail = [{x: serpent.headX, y: serpent.headY}];
             for (let i = 0; i < 8; i++) spawnPrey();
-            draw();
+
+            lastTime = performance.now();
+            requestAnimationFrame(loop);
         }
         setup();
 
         function gameOver() {
+            if (!gameActive) return;
             gameActive = false;
             document.getElementById('hud').style.display = 'none';
             playDeathSound();

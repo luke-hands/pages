@@ -852,7 +852,7 @@
 
                 ship.thrusting = keys['ArrowUp'];
                 if (ship.thrusting) {
-                    const force = Vector.rotate({ x: 0.002, y: 0 }, ship.body.angle);
+                    const force = Vector.rotate({ x: 0.12 * dt, y: 0 }, ship.body.angle);
                     Body.applyForce(ship.body, ship.body.position, force);
                     if (Math.random() < 0.1) playSound(50 + Math.random() * 20, 'sawtooth', 0.1, 0.02);
                 }
@@ -917,9 +917,9 @@
             // Update particles
             for (let i = particles.length - 1; i >= 0; i--) {
                 const p = particles[i];
-                p.graphics.x += p.vx;
-                p.graphics.y += p.vy;
-                p.life -= p.decay;
+                p.graphics.x += p.vx * dt * 60;
+                p.graphics.y += p.vy * dt * 60;
+                p.life -= p.decay * dt * 60;
                 p.graphics.alpha = p.life;
                 if (p.life <= 0) {
                     worldContainer.removeChild(p.graphics);
@@ -1079,12 +1079,14 @@
 
             update(dt);
 
-            if (shakeTime > 0) {
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (shakeTime > 0 && !reduceMotion) {
                 const shakeX = (Math.random() - 0.5) * 15;
                 const shakeY = (Math.random() - 0.5) * 15;
                 worldContainer.position.set(shakeX, shakeY);
                 shakeTime -= dt;
             } else {
+                shakeTime = Math.max(0, shakeTime - dt);
                 worldContainer.position.set(0, 0);
             }
 

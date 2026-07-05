@@ -76,6 +76,7 @@
             backdrop-filter: blur(12px);
             z-index: 10;
             min-width: 280px;
+            pointer-events: none;
         }
 
         #start-screen {
@@ -164,26 +165,26 @@
             canvas.height = height * dpr;
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             U = Math.min(width, height) / 100;
+            if (state) state.vignette = null;
         }
 
         window.addEventListener('resize', resize);
         resize();
 
         const REF_SPEED = 45; // 45U/sec
-        const MAX_PLAYER_SPEED = 60; // 60U/sec
         const TOUCH_SENSITIVITY = 1.3;
         const TOUCH_EASE = 25;
 
         let state = {
             waitingToStart: true,
-            player: { x: width / 2, y: height / 2, lastX: width / 2, lastY: height / 2, targetX: width / 2, targetY: height / 2, speed: 0, trail: new Float32Array(20) }, // [x,y,x,y...]
+            player: { x: width / 2, y: height / 2, lastX: width / 2, lastY: height / 2, targetX: width / 2, targetY: height / 2, speed: 0, trail: new Float32Array(20).fill(NaN) }, // [x,y,x,y...]
             mouse: { x: width / 2, y: height / 2, active: false },
             keys: {},
             touch: { x: 0, y: 0, lastX: 0, lastY: 0, active: false },
             timeScale: 0.08,
             gameTime: 0,
             score: 0,
-            best: parseInt(localStorage.getItem('standstill_best')) || 0,
+            best: (() => { try { return parseInt(localStorage.getItem('standstill_best')) || 0; } catch(e) { return 0; } })(),
             combo: 0,
             lastStarTime: 0,
             active: true,
@@ -198,7 +199,11 @@
             difficulty: 0,
             hitStop: 0,
             fatalObject: null,
-            audio: { ctx: null, oscillator: null, filter: null, gain: null }
+            audio: { ctx: null, oscillator: null, filter: null, gain: null },
+            vignette: null,
+            lastDesat: -1,
+            reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+            deathTimer: 0
         };
 
         bestEl.textContent = `BEST: ${state.best}`;
@@ -316,7 +321,7 @@
         });
 
         function spawnBullet(x, y, vx, vy) {
-            state.bullets.push({ x, y, vx, vy, r: 0.8 * U, trail: new Float32Array(10), missed: false });
+            state.bullets.push({ x, y, vx, vy, r: 0.8 * U, trail: new Float32Array(10).fill(NaN), missed: false });
         }
 
         function createEmitter(x, y, angle, rotSpeed) {
@@ -324,12 +329,13 @@
         }
 
         function spawnStar() {
-            let x, y, dist;
+            let x, y, dist, attempts = 0;
             do {
                 x = (0.1 + Math.random() * 0.8) * width;
                 y = (0.1 + Math.random() * 0.8) * height;
                 dist = Math.hypot(x - state.player.x, y - state.player.y);
-            } while (dist < 25 * U);
+                attempts++;
+            } while (dist < 25 * U && attempts < 100);
             state.stars.push({ x, y, r: 1.8 * U, timer: 6 });
         }
 
@@ -346,7 +352,7 @@
             state.particles = [];
             state.player.x = width / 2;
             state.player.y = height / 2;
-            state.player.trail.fill(0);
+            state.player.trail.fill(NaN);
             state.timeScale = 0.08;
             gameOverEl.style.display = 'none';
             scoreEl.textContent = '0';
@@ -362,14 +368,11 @@
             finalScoreEl.textContent = state.score;
             if (state.score > state.best) {
                 state.best = state.score;
-                localStorage.setItem('standstill_best', state.best);
+                try { localStorage.setItem('standstill_best', state.best); } catch(e) {}
                 bestEl.textContent = `BEST: ${state.best}`;
             }
             playDeathThud();
-            setTimeout(() => {
-                state.active = false;
-                gameOverEl.style.display = 'block';
-            }, 900);
+            state.deathTimer = 0.9;
         }
 
         function update(dt) {
@@ -381,18 +384,36 @@
                 state.audio.gain.gain.setTargetAtTime(state.dying ? 0 : 0.05 + 0.05 * state.timeScale, state.audio.ctx.currentTime, 0.1);
             }
 
+            // Particles
+            for (let i = state.particles.length - 1; i >= 0; i--) {
+                const p = state.particles[i];
+                if (p.type === 'ripple') {
+                    p.r += 20 * U * dt; // Ripples use real time
+                    p.life -= 2 * dt;
+                } else {
+                    p.x += p.vx * dt * state.timeScale;
+                    p.y += p.vy * dt * state.timeScale;
+                    p.life -= dt * state.timeScale * 2;
+                }
+                if (p.life <= 0) state.particles.splice(i, 1);
+            }
+
             if (state.dying) {
                 state.hitStop -= dt;
+                state.deathTimer -= dt;
                 if (state.hitStop > 0) {
                     spawnParticles(state.player.x, state.player.y, '#46c8ff', 2);
                 } else {
                      // shattering particles
                      if (state.hitStop > -0.05) spawnParticles(state.player.x, state.player.y, '#46c8ff', 20, 2);
                 }
+
+                if (state.deathTimer <= 0) {
+                    state.active = false;
+                    gameOverEl.style.display = 'block';
+                }
                 return;
             }
-
-            let moving = false;
 
             // Keyboard movement
             let kx = 0, ky = 0;
@@ -402,7 +423,6 @@
             if (state.keys['ArrowDown'] || state.keys['KeyS']) ky += 1;
 
             if (kx !== 0 || ky !== 0) {
-                moving = true;
                 const mag = Math.hypot(kx, ky);
                 const speed = 45 * U;
                 state.player.x += (kx / mag) * speed * dt;
@@ -411,7 +431,6 @@
 
             // Mouse movement (easing)
             if (state.mouse.active && !state.touch.active) {
-                moving = true;
                 const dx = state.mouse.x - state.player.x;
                 const dy = state.mouse.y - state.player.y;
                 const dist = Math.hypot(dx, dy);
@@ -432,7 +451,6 @@
 
             // Mobile touch (relative + smooth)
             if (state.touch.active) {
-                moving = true;
                 const tdx = (state.touch.x - state.touch.lastX) * TOUCH_SENSITIVITY;
                 const tdy = (state.touch.y - state.touch.lastY) * TOUCH_SENSITIVITY;
 
@@ -622,20 +640,6 @@
                 }
             }
 
-            // Particles
-            for (let i = state.particles.length - 1; i >= 0; i--) {
-                const p = state.particles[i];
-                if (p.type === 'ripple') {
-                    p.r += 20 * U * dt; // Ripples use real time
-                    p.life -= 2 * dt;
-                } else {
-                    p.x += p.vx * gdt;
-                    p.y += p.vy * gdt;
-                    p.life -= gdt * 2;
-                }
-                if (p.life <= 0) state.particles.splice(i, 1);
-            }
-
             // Player trail
             for (let j = state.player.trail.length - 2; j >= 0; j--) state.player.trail[j+2] = state.player.trail[j];
             state.player.trail[0] = state.player.x; state.player.trail[1] = state.player.y;
@@ -656,10 +660,14 @@
             ctx.fillRect(0, 0, width, height);
 
             // Vignette
-            const grad = ctx.createRadialGradient(width/2, height/2, 0, width/2, height/2, Math.max(width, height));
-            grad.addColorStop(0, 'transparent');
-            grad.addColorStop(1, `rgba(124, 108, 255, ${0.15 * desat})`);
-            ctx.fillStyle = grad;
+            if (!state.vignette || Math.abs(desat - state.lastDesat) > 0.01) {
+                const grad = ctx.createRadialGradient(width/2, height/2, 0, width/2, height/2, Math.max(width, height));
+                grad.addColorStop(0, 'transparent');
+                grad.addColorStop(1, `rgba(124, 108, 255, ${0.15 * desat})`);
+                state.vignette = grad;
+                state.lastDesat = desat;
+            }
+            ctx.fillStyle = state.vignette;
             ctx.fillRect(0, 0, width, height);
 
             // Draw stars
@@ -685,10 +693,10 @@
                 ctx.lineWidth = radius;
                 ctx.lineCap = 'round';
                 ctx.beginPath();
-                if (b.trail[2] !== 0) {
+                if (!isNaN(b.trail[2])) {
                     ctx.moveTo(b.trail[0], b.trail[1]);
                     for (let i = 2; i < b.trail.length; i+=2) {
-                        if (b.trail[i] === 0) break;
+                        if (isNaN(b.trail[i])) break;
                         ctx.lineTo(b.trail[i], b.trail[i+1]);
                     }
                 } else {
@@ -723,7 +731,7 @@
             // Draw lasers
             state.lasers.forEach(l => {
                 const isFatal = state.dying && l === state.fatalObject;
-                const currentAngle = l.active ? l.angle + l.sweep - Math.PI / 6 : l.angle;
+                const currentAngle = l.active ? l.angle + l.sweep - Math.PI / 6 : l.angle - Math.PI / 6;
                 ctx.save();
                 ctx.translate(l.x, l.y);
                 ctx.rotate(currentAngle);
@@ -740,7 +748,7 @@
                     ctx.strokeStyle = '#7c6cff';
                     ctx.lineWidth = 1;
                     ctx.setLineDash([5, 5]);
-                    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(state.gameTime * 20);
+                    ctx.globalAlpha = state.reducedMotion ? 0.3 : 0.5 + 0.5 * Math.sin(state.gameTime * 20);
                     ctx.beginPath();
                     ctx.moveTo(0, 0);
                     ctx.lineTo(width * 2, 0);
@@ -773,9 +781,9 @@
             if (!state.dying || state.hitStop > 0) {
                 // Ribbon trail
                 ctx.beginPath();
-                if (state.player.trail[2] !== 0) {
+                if (!isNaN(state.player.trail[2])) {
                     for (let i = 0; i < state.player.trail.length - 2; i += 2) {
-                        if (state.player.trail[i+2] === 0) break;
+                        if (isNaN(state.player.trail[i+2])) break;
                         const alpha = 0.5 * (1 - i / state.player.trail.length);
                         ctx.strokeStyle = `rgba(70, 200, 255, ${alpha})`;
                         ctx.lineWidth = (1.2 * U) * (1 - i / state.player.trail.length);
@@ -786,7 +794,11 @@
                     }
                 }
 
-                ctx.fillStyle = state.dying && Math.floor(state.gameTime * 20) % 2 === 0 ? '#fff' : '#46c8ff';
+                if (state.dying && state.reducedMotion) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                } else {
+                    ctx.fillStyle = state.dying && Math.floor(state.gameTime * 20) % 2 === 0 ? '#fff' : '#46c8ff';
+                }
                 ctx.beginPath();
                 ctx.arc(state.player.x, state.player.y, 1.2 * U, 0, Math.PI * 2);
                 ctx.fill();

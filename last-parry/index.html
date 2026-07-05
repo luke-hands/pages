@@ -29,6 +29,7 @@
             display: block;
             width: 100vw;
             height: 100vh;
+            height: 100dvh;
         }
 
         #ui {
@@ -175,7 +176,7 @@
         </div>
     </div>
 
-    <canvas id="gameCanvas"></canvas>
+    <canvas id="gameCanvas" aria-label="Last Parry - Survival Action Game" role="img"></canvas>
 
     <script>
         // Initial setup
@@ -190,7 +191,33 @@
 
         let width, height, dpr, u;
 
+        // GC Optimization
+        const toRemove = new Set();
+
+        // Entities
+        let enemies = [];
+        let particles = [];
+        let slashes = [];
+        let feedbacks = [];
+        let player = { x: 0, y: 0, r: 0 };
+
+        // CSS Color Caching
+        const COLORS = {};
+        function cacheColors() {
+            const root = document.documentElement;
+            const vars = ['--bg', '--violet', '--cyan', '--pink', '--fg'];
+            const style = getComputedStyle(root);
+            vars.forEach(v => {
+                COLORS[v] = style.getPropertyValue(v).trim();
+            });
+        }
+        cacheColors();
+
         function resize() {
+            const oldWidth = width;
+            const oldHeight = height;
+            const oldU = u;
+
             dpr = Math.min(window.devicePixelRatio || 1, 2);
             width = window.innerWidth;
             height = window.innerHeight;
@@ -198,6 +225,40 @@
             canvas.height = height * dpr;
             u = Math.min(width, height);
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            if (oldWidth && oldHeight && (gameState === STATE_PLAYING || gameState === STATE_GAMEOVER)) {
+                const scaleX = width / oldWidth;
+                const scaleY = height / oldHeight;
+                const scaleU = u / oldU;
+
+                player.x = width / 2;
+                player.y = height / 2;
+                player.r = PLAYER_RADIUS * u;
+
+                enemies.forEach(e => {
+                    e.x *= scaleX;
+                    e.y *= scaleY;
+                    e.r *= scaleU;
+                    e.vx *= scaleU;
+                    e.vy *= scaleU;
+                    e.trail.forEach(t => {
+                        t.x *= scaleX;
+                        t.y *= scaleY;
+                    });
+                });
+
+                particles.forEach(p => {
+                    p.x *= scaleX;
+                    p.y *= scaleY;
+                    p.vx *= scaleU;
+                    p.vy *= scaleU;
+                });
+
+                slashes.forEach(s => {
+                    s.x = width / 2;
+                    s.y = height / 2;
+                });
+            }
         }
 
         window.addEventListener('resize', resize);
@@ -212,7 +273,10 @@
         let gameState = STATE_START;
         let score = 0;
         let multiplier = 1;
-        let bestScore = parseInt(localStorage.getItem('last-parry-best')) || 0;
+        let bestScore = 0;
+        try {
+            bestScore = parseInt(localStorage.getItem('last-parry-best')) || 0;
+        } catch (e) {}
         let lastTime = 0;
         let dt = 0;
         let timeScale = 1;
@@ -229,10 +293,6 @@
         const PARRY_WINDOW_TOTAL = 200;
         const PARRY_WINDOW_PERFECT = 80;
 
-        // Entities
-        let enemies = [];
-        let particles = [];
-        let player = { x: 0, y: 0, r: 0 };
 
         // Spawning logic
         let spawnTimer = 0;
@@ -258,7 +318,9 @@
 
                 if (gameState === STATE_GAMEOVER && score > bestScore) {
                     bestScore = score;
-                    localStorage.setItem('last-parry-best', bestScore);
+                    try {
+                        localStorage.setItem('last-parry-best', bestScore);
+                    } catch (e) {}
                     bestEl.textContent = `BEST: ${bestScore}`;
                 }
             } else if (gameState === STATE_PLAYING) {
@@ -276,6 +338,8 @@
             spawnCount = 0;
             enemies = [];
             particles = [];
+            slashes = [];
+            feedbacks = [];
             pendingSpawns = [];
             player = { x: width / 2, y: height / 2, r: PLAYER_RADIUS * u };
             updateUI();
@@ -340,7 +404,7 @@
             }
 
             if (parryLockout > 0) {
-                parryLockout -= effectiveDt;
+                parryLockout -= dt;
             }
 
             // Spawning
@@ -374,7 +438,7 @@
             const telegraphTime = 600 - Math.min(1, gameTime / 90000) * 250;
 
             // Update enemies
-            const toRemove = new Set();
+            toRemove.clear();
             for (let i = enemies.length - 1; i >= 0; i--) {
                 const e = enemies[i];
                 if (toRemove.has(e)) continue;
@@ -451,6 +515,14 @@
                 p.life -= effectiveDt;
                 if (p.life <= 0) particles.splice(i, 1);
             }
+
+            // Update feedbacks
+            for (let i = feedbacks.length - 1; i >= 0; i--) {
+                const f = feedbacks[i];
+                f.y -= 0.05 * u * (dt / 1000);
+                f.life -= dt;
+                if (f.life <= 0) feedbacks.splice(i, 1);
+            }
         }
 
         function spawnEnemy(forceAngle = null) {
@@ -489,18 +561,20 @@
             for (let i = 0; i < 12; i++) {
                 const angle = Math.random() * Math.PI * 2;
                 const speed = (Math.random() * 0.2 + 0.1) * u / 1000;
+                const life = 400 + Math.random() * 400;
                 particles.push({
                     x, y,
                     vx: Math.cos(angle) * speed,
                     vy: Math.sin(angle) * speed,
-                    life: 400 + Math.random() * 400,
+                    life,
+                    maxLife: life,
                     color
                 });
             }
         }
 
         function varColor(name) {
-            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+            return COLORS[name] || '#ffffff';
         }
 
         // Audio
@@ -571,6 +645,7 @@
                         e.vx = -e.vx * 3;
                         e.vy = -e.vy * 3;
                         bestTier = 'PERFECT';
+                        spawnFeedback(e.x, e.y, 'PERFECT!', varColor('--cyan'));
                     } else {
                         e.state = 'KNOCKBACK';
                         e.pauseTimer = 400;
@@ -578,7 +653,10 @@
                         const kbDist = 0.45 * u;
                         e.x = player.x + Math.cos(angle) * kbDist;
                         e.y = player.y + Math.sin(angle) * kbDist;
-                        if (bestTier !== 'PERFECT') bestTier = 'LOOSE';
+                        if (bestTier !== 'PERFECT') {
+                            bestTier = 'LOOSE';
+                            spawnFeedback(e.x, e.y, 'LOOSE', varColor('--violet'));
+                        }
                     }
                 }
             });
@@ -620,19 +698,24 @@
             onParry();
         });
 
+        function spawnFeedback(x, y, text, color) {
+            feedbacks.push({ x, y, text, color, life: 800, maxLife: 800 });
+        }
+
         // Slash effect
-        let slashes = [];
         function spawnSlash(x, y) {
             slashes.push({ x, y, life: 200 });
             // Add sparks
             for (let i = 0; i < 25; i++) {
                 const angle = Math.random() * Math.PI * 2;
                 const speed = (Math.random() * 0.4 + 0.2) * u / 1000;
+                const life = 300 + Math.random() * 300;
                 particles.push({
                     x, y,
                     vx: Math.cos(angle) * speed,
                     vy: Math.sin(angle) * speed,
-                    life: 300 + Math.random() * 300,
+                    life,
+                    maxLife: life,
                     color: '#fff'
                 });
             }
@@ -758,9 +841,20 @@
                     ctx.fill();
                 });
 
+                // Draw Feedbacks
+                ctx.save();
+                ctx.textAlign = 'center';
+                ctx.font = `bold ${Math.floor(u * 0.04)}px ui-sans-serif, system-ui`;
+                feedbacks.forEach(f => {
+                    ctx.globalAlpha = f.life / f.maxLife;
+                    ctx.fillStyle = f.color;
+                    ctx.fillText(f.text, f.x, f.y);
+                });
+                ctx.restore();
+
                 // Draw Particles
                 particles.forEach(p => {
-                    ctx.globalAlpha = p.life / 800;
+                    ctx.globalAlpha = p.life / p.maxLife;
                     ctx.fillStyle = p.color;
                     ctx.beginPath();
                     ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);

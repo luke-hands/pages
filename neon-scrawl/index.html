@@ -240,9 +240,10 @@
         <p>Tap anywhere else to restart</p>
     </div>
 
-    <canvas id="canvas"></canvas>
+    <canvas id="canvas" aria-label="Neon Scrawl Game"></canvas>
 
     <script>
+        const TOUCH_OFFSET = 60;
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const scoreEl = document.getElementById('score');
@@ -272,6 +273,7 @@
         let activeStrokes = new Map();
         let gameTime = 0;
         let shake = 0;
+        let isFrozen = false;
         let gridPulse = 0;
         let audioCtx = null;
 
@@ -283,7 +285,11 @@
         };
 
         function init() {
-            bestScore = parseInt(localStorage.getItem('neonScrawlBest') || '0');
+            try {
+                bestScore = parseInt(localStorage.getItem('neonScrawlBest') || '0');
+            } catch (e) {
+                bestScore = 0;
+            }
             bestScoreEl.textContent = bestScore;
             resize();
             menuEl.style.display = 'block';
@@ -307,15 +313,18 @@
             }
 
             // Re-init basins
+            const levels = {};
+            basins.forEach(b => levels[b.color] = b.level);
+
             const bw = width * 0.22;
             const bh = height * 0.08;
             const targetY = height - bh;
             basins = [
-                { color: 'cyan', x: 0, y: targetY, targetY: targetY, w: bw, h: bh, level: 0 },
-                { color: 'pink', x: width - bw, y: targetY, targetY: targetY, w: bw, h: bh, level: 0 }
+                { color: 'cyan', x: 0, y: targetY, targetY: targetY, w: bw, h: bh, level: levels.cyan || 0 },
+                { color: 'pink', x: width - bw, y: targetY, targetY: targetY, w: bw, h: bh, level: levels.pink || 0 }
             ];
             if (score >= 150) {
-                basins.push({ color: 'violet', x: width / 2 - bw / 2, y: targetY, targetY: targetY, w: bw, h: bh, level: 0 });
+                basins.push({ color: 'violet', x: width / 2 - bw / 2, y: targetY, targetY: targetY, w: bw, h: bh, level: levels.violet || 0 });
             }
         }
 
@@ -345,6 +354,11 @@
             ];
         }
 
+        function updateInkMeter() {
+            inkMeter.style.width = (inkAmount / inkCapacity * 100) + '%';
+            inkMeter.style.background = inkAmount < inkCapacity * 0.1 ? '#ff4646' : COLORS.violet;
+        }
+
         function updateUI() {
             scoreEl.textContent = score;
             multiplierEl.textContent = `×${combo}`;
@@ -354,10 +368,7 @@
             for (let i = 0; i < 3; i++) {
                 livesStr += i < lives ? '●' : '○';
             }
-            livesEl.innerHTML = livesStr;
-
-            inkMeter.style.width = (inkAmount / inkCapacity * 100) + '%';
-            inkMeter.style.background = inkAmount < inkCapacity * 0.1 ? '#ff4646' : COLORS.violet;
+            livesEl.textContent = livesStr;
 
             if (score >= 150 && basins.length < 3) {
                 const bw = width * 0.22;
@@ -385,6 +396,7 @@
                 this.stretch = 1;
                 this.squashTimer = 0;
                 this.impactNormal = { x: 0, y: 1 };
+                this.bounceCooldown = 0;
             }
 
             update(dt) {
@@ -392,6 +404,8 @@
                 this.vy += gravity * dt;
                 this.x += this.vx * dt;
                 this.y += this.vy * dt;
+
+                if (this.bounceCooldown > 0) this.bounceCooldown -= dt * 1000;
 
                 if (this.squashTimer > 0) {
                     this.squashTimer -= dt * 1000;
@@ -433,12 +447,12 @@
         }
 
         function checkCollisions(dt) {
+            if (!gameActive) return;
             for (let i = motes.length - 1; i >= 0; i--) {
                 const m = motes[i];
 
                 // Mote vs Stroke collisions
                 for (const s of strokes) {
-                    if (s.age > 4000) continue;
                     for (let j = 0; j < s.points.length - 1; j++) {
                         const p1 = s.points[j];
                         const p2 = s.points[j+1];
@@ -451,8 +465,11 @@
                             m.x = collision.x + collision.normal.x * (m.radius + 1);
                             m.y = collision.y + collision.normal.y * (m.radius + 1);
 
-                            createSparks(m.x, m.y, m.color);
-                            playBounceSound(speed);
+                            if (m.bounceCooldown <= 0) {
+                                createSparks(m.x, m.y, m.color);
+                                playBounceSound(speed);
+                                m.bounceCooldown = 50;
+                            }
                             break;
                         }
                     }
@@ -470,12 +487,12 @@
                             if (combo !== oldCombo && (combo === 4 || combo === 8)) {
                                 shake = 4;
                                 gridPulse = 1.0;
-                                setTimeout(() => shake = 0, 150);
                             }
                         } else {
                             loseLife();
                         }
                         motes.splice(i, 1);
+                        if (!gameActive) break;
                         caught = true;
                         updateUI();
                         break;
@@ -486,6 +503,7 @@
                     loseLife();
                     motes.splice(i, 1);
                     updateUI();
+                    if (!gameActive) break;
                 }
             }
         }
@@ -539,13 +557,15 @@
         }
 
         function loseLife() {
+            if (isFrozen) return;
+            isFrozen = true;
             lives--;
             combo = 1;
             shake = 10;
             gameActive = false;
             setTimeout(() => {
+                isFrozen = false;
                 gameActive = lives > 0;
-                shake = 0;
                 if (lives <= 0) endGame();
                 updateUI();
             }, 120);
@@ -555,7 +575,9 @@
             gameActive = false;
             if (score > bestScore) {
                 bestScore = score;
-                localStorage.setItem('neonScrawlBest', bestScore);
+                try {
+                    localStorage.setItem('neonScrawlBest', bestScore);
+                } catch (e) {}
             }
             finalScoreEl.textContent = score;
             finalBestEl.textContent = bestScore;
@@ -595,6 +617,11 @@
             const dt = Math.min(time - lastTime, 100) / 1000;
             lastTime = time;
 
+            if (shake > 0) {
+                shake *= Math.pow(0.001, dt);
+                if (shake < 0.1) shake = 0;
+            }
+
             if (gameActive) {
                 if (gridPulse > 0) gridPulse -= dt * 2;
                 gameTime += dt * 1000;
@@ -602,7 +629,7 @@
                 if (spawnTimer <= 0) spawnMote();
 
                 inkAmount = Math.min(inkCapacity, inkAmount + inkCapacity * 0.15 * dt);
-                updateUI();
+                updateInkMeter();
 
                 // Substeps for physics
                 const substeps = 4;
@@ -629,8 +656,8 @@
                 // Update particles
                 for (let i = particles.length - 1; i >= 0; i--) {
                     const p = particles[i];
-                    p.x += p.vx;
-                    p.y += p.vy;
+                    p.x += p.vx * dt * 60;
+                    p.y += p.vy * dt * 60;
                     p.life -= dt * 2;
                     if (p.life <= 0) particles.splice(i, 1);
                 }
@@ -770,7 +797,7 @@
             if (inkAmount < inkCapacity * 0.05) return;
 
             const x = e.clientX;
-            const y = e.clientY - (e.pointerType === 'touch' ? 60 : 0);
+            const y = e.clientY - (e.pointerType === 'touch' ? TOUCH_OFFSET : 0);
             const stroke = { points: [{x, y}], age: 0, pointerType: e.pointerType };
             activeStrokes.set(e.pointerId, stroke);
             strokes.push(stroke);
@@ -783,7 +810,7 @@
             if (!stroke) return;
 
             const x = e.clientX;
-            const y = e.clientY - (e.pointerType === 'touch' ? 60 : 0);
+            const y = e.clientY - (e.pointerType === 'touch' ? TOUCH_OFFSET : 0);
             const lastPoint = stroke.points[stroke.points.length - 1];
             const dist = Math.hypot(x - lastPoint.x, y - lastPoint.y);
 
@@ -800,6 +827,7 @@
         const endStroke = e => activeStrokes.delete(e.pointerId);
         window.addEventListener('pointerup', endStroke);
         window.addEventListener('pointercancel', endStroke);
+        window.addEventListener('pointerleave', endStroke);
 
         window.addEventListener('keydown', e => {
             if (e.key.toLowerCase() === 'r') resetGame();
@@ -815,14 +843,10 @@
             menuEl.style.display = 'block';
         });
 
-        window.addEventListener('touchstart', e => {
-            if (e.touches.length >= 2 && !gameActive) resetGame();
-        });
-
         window.addEventListener('resize', resize);
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) gameActive = false;
-            else if (lives > 0) gameActive = true;
+            else if (lives > 0 && !isFrozen && gameOverEl.style.display !== 'block') gameActive = true;
         });
 
         init();

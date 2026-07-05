@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Skyburst</title>
+    <!-- Include PixiJS and Howler.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+    
     <style>
         :root {
             --bg: #07080f;
@@ -28,6 +32,10 @@
         canvas {
             display: block;
             touch-action: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
         }
 
         #ui {
@@ -88,6 +96,16 @@
         }
 
         .highlight { color: var(--accent-violet); }
+        
+        #flash {
+            position: absolute;
+            inset: 0;
+            background: white;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 15;
+            transition: opacity 0.1s;
+        }
     </style>
 </head>
 <body>
@@ -97,6 +115,7 @@
             <div id="best-score">BEST 0m</div>
         </div>
     </div>
+    <div id="flash"></div>
 
     <div id="overlay">
         <div id="msg">
@@ -106,18 +125,147 @@
         </div>
     </div>
 
-    <canvas id="canvas" aria-label="Skyburst: Endless comet climber game" role="img"></canvas>
-
+    <!-- PixiJS injects its own canvas -->
     <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
+        // ==========================================
+        // WAV AUDIO SYNTHESIS FOR HOWLER.JS
+        // ==========================================
+        function createWavDataUri(samples, sampleRate = 44100) {
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const view = new DataView(buffer);
+            
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+            
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + samples.length * 2, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, samples.length * 2, true);
+            
+            let offset = 44;
+            for (let i = 0; i < samples.length; i++, offset += 2) {
+                let s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i += 1024) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + 1024, bytes.byteLength)));
+            }
+            return 'data:audio/wav;base64,' + btoa(binary);
+        }
+
+        // Generate synthetic sounds
+        const sr = 44100;
+        
+        // Pop sound
+        let popLen = Math.floor(sr * 0.3);
+        let popSamples = new Float32Array(popLen);
+        for(let i = 0; i < popLen; i++) {
+            let t = i / sr;
+            let freq = 100 + (100 * Math.exp(-t * 30));
+            let env = Math.exp(-t * 20);
+            popSamples[i] = Math.sin(2 * Math.PI * freq * t) * env;
+            // Add some noise for a crackle
+            if (t < 0.1) popSamples[i] += (Math.random() * 2 - 1) * 0.5 * Math.exp(-t * 50);
+        }
+        
+        // Steal sound
+        let stealLen = Math.floor(sr * 0.3);
+        let stealSamples = new Float32Array(stealLen);
+        for(let i = 0; i < stealLen; i++) {
+            let t = i / sr;
+            let env = Math.exp(-t * 15);
+            // Major chord sweep
+            let p1 = Math.sin(2 * Math.PI * 440 * t);
+            let p2 = Math.sin(2 * Math.PI * 554.37 * t);
+            let p3 = Math.sin(2 * Math.PI * 659.25 * t);
+            stealSamples[i] = ((p1 + p2 + p3) / 3) * env;
+        }
+
+        const sounds = {
+            pop: new Howl({ src: [createWavDataUri(popSamples)], volume: 0.4 }),
+            steal: new Howl({ src: [createWavDataUri(stealSamples)], volume: 0.6 })
+        };
+
+        // ==========================================
+        // PIXIJS INITIALIZATION
+        // ==========================================
+        const app = new PIXI.Application({
+            resizeTo: window,
+            backgroundColor: 0x07080f,
+            resolution: window.devicePixelRatio || 1,
+            autoDensity: true
+        });
+        document.body.appendChild(app.view);
+        app.view.setAttribute('aria-label', 'Skyburst: Endless comet climber game');
+        app.view.setAttribute('role', 'img');
+
+        // Containers
+        const worldContainer = new PIXI.Container();
+        app.stage.addChild(worldContainer);
+
+        const starsContainer = new PIXI.Container();
+        worldContainer.addChild(starsContainer);
+
+        const fragmentsContainer = new PIXI.ParticleContainer(30000, {
+            scale: true, position: true, rotation: false, uvs: false, tint: true, alpha: true
+        });
+        fragmentsContainer.blendMode = PIXI.BLEND_MODES.ADD;
+        worldContainer.addChild(fragmentsContainer);
+
+        const entitiesContainer = new PIXI.Container();
+        worldContainer.addChild(entitiesContainer);
+
+        // Pre-render textures
+        function createGlowTexture(color, radius, coreRadius) {
+            const gfx = new PIXI.Graphics();
+            const canvas = document.createElement('canvas');
+            canvas.width = radius * 2;
+            canvas.height = radius * 2;
+            const context = canvas.getContext('2d');
+            
+            const grad = context.createRadialGradient(radius, radius, 0, radius, radius, radius);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(coreRadius/radius, '#ffffff');
+            grad.addColorStop(coreRadius/radius + 0.1, color);
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            
+            context.fillStyle = grad;
+            context.fillRect(0, 0, radius * 2, radius * 2);
+            
+            return PIXI.Texture.from(canvas);
+        }
+
+        const particleTexture = createGlowTexture('#ffffff', 16, 4);
+        const starTexture = createGlowTexture('#ffffff', 4, 1);
+        const cometTexture = createGlowTexture('#46c8ff', 24, 6);
+        const shellTexture = createGlowTexture('#ffffff', 12, 6);
+
+        // ==========================================
+        // GAME VARIABLES
+        // ==========================================
         const scoreEl = document.getElementById('score');
         const bestScoreEl = document.getElementById('best-score');
         const overlayEl = document.getElementById('overlay');
         const msgEl = document.getElementById('msg');
+        const flashEl = document.getElementById('flash');
 
-        let width, height, dpr;
-        let lastTime = performance.now();
+        let width = window.innerWidth;
+        let height = window.innerHeight;
         let gameActive = false;
         let altitude = 0;
         let bestAltitude = 0;
@@ -125,59 +273,47 @@
         let lastStealTime = 0;
         let shake = 0;
         let hitStop = 0;
-        let flash = 0;
-        let history = []; // for chasing bursts
+        let history = []; 
         let gameOverTimeout = null;
         let burstTimeouts = [];
         const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-        const COLORS = ['#7c6cff', '#46c8ff', '#ff6ec7'];
+        const COLORS = [0x7c6cff, 0x46c8ff, 0xff6ec7, 0xffd700, 0x00ffaa];
 
-        // Audio
-        let audioCtx = null;
-        function initAudio() {
-            if (audioCtx) return;
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
+        // ==========================================
+        // ENTITIES
+        // ==========================================
+        
+        let shells = [];
+        let fragments = [];
+        let stars = [];
+        let spawnTimer = 0;
+        let score = 0;
+
+        function initStars() {
+            starsContainer.removeChildren();
+            stars = [];
+            for(let i=0; i<100; i++) {
+                const sprite = new PIXI.Sprite(starTexture);
+                sprite.anchor.set(0.5);
+                sprite.x = Math.random() * width;
+                sprite.y = Math.random() * height;
+                sprite.z = Math.random() * 0.5 + 0.1;
+                sprite.scale.set(sprite.z * 0.5);
+                sprite.alpha = sprite.z;
+                starsContainer.addChild(sprite);
+                stars.push(sprite);
             }
         }
 
-        function playPop() {
-            if (!audioCtx) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(100 + Math.random() * 50, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.3);
-            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.3);
-        }
-
-        function playSteal() {
-            if (!audioCtx) return;
-            [440, 554.37, 659.25].forEach((f, i) => {
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(f, audioCtx.currentTime + i * 0.05);
-                gain.gain.setValueAtTime(0.05, audioCtx.currentTime + i * 0.05);
-                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + i * 0.05 + 0.2);
-                osc.start(audioCtx.currentTime + i * 0.05);
-                osc.stop(audioCtx.currentTime + i * 0.05 + 0.2);
-            });
-        }
-
-        class Comet {
-            constructor() {
-                this.reset();
-            }
+        // The Player
+        const comet = {
+            sprite: new PIXI.Sprite(cometTexture),
+            x: width / 2, y: height * 0.7,
+            targetX: width / 2, targetY: height * 0.7,
+            vx: 0, vy: 0,
+            radius: 6,
+            hitRadius: 4,
             reset() {
                 this.x = width / 2;
                 this.y = height * 0.7;
@@ -185,14 +321,13 @@
                 this.targetY = this.y;
                 this.vx = 0;
                 this.vy = 0;
-                this.radius = 6;
-                this.hitRadius = this.radius * 0.6;
-                this.trail = [];
-                this.maxTrail = 20;
-            }
+                this.sprite.x = this.x;
+                this.sprite.y = this.y;
+                this.sprite.anchor.set(0.5);
+                this.sprite.tint = 0x46c8ff;
+            },
             update(dt) {
-                // Responsive mouse easing
-                const omega = 15; // responsive speed
+                const omega = 15;
                 const n1 = this.vx - (this.x - this.targetX) * omega * omega * dt;
                 const n2 = 1 + omega * dt;
                 this.vx = n1 / (n2 * n2);
@@ -203,61 +338,56 @@
                 this.vy = m1 / (m2 * m2);
                 this.y += this.vy * dt;
 
-                // Bounds
                 this.x = Math.max(this.radius, Math.min(width - this.radius, this.x));
                 this.y = Math.max(this.radius, Math.min(height - this.radius, this.y));
+                
+                this.sprite.x = this.x;
+                this.sprite.y = this.y;
 
-                this.trail.push({x: this.x, y: this.y});
-                if (this.trail.length > this.maxTrail) this.trail.shift();
-            }
-            draw() {
-                ctx.save();
-                ctx.globalCompositeOperation = 'lighter';
-
-                // Trail
-                if (this.trail.length > 1) {
-                    ctx.beginPath();
-                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
-                    for (let i = 1; i < this.trail.length; i++) {
-                        const p = this.trail[i];
-                        const ratio = i / this.trail.length;
-                        const size = ratio * this.radius;
-                        ctx.lineTo(p.x, p.y);
-                        ctx.lineWidth = size * 2;
-                        ctx.strokeStyle = `rgba(255, 255, 255, ${ratio * 0.4})`;
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.moveTo(p.x, p.y);
-                    }
+                // Trail emission
+                if (gameActive && Math.random() < 0.5) {
+                    spawnFragment(this.x, this.y, -this.vx*0.1 + (Math.random()-0.5)*50, -this.vy*0.1 + (Math.random()-0.5)*50, 0x46c8ff, 0.5, 0.4);
                 }
-
-                // Comet head
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                ctx.fillStyle = '#fff';
-                ctx.shadowBlur = 10;
-                ctx.shadowColor = '#fff';
-                ctx.fill();
-                ctx.restore();
             }
-        }
+        };
+        entitiesContainer.addChild(comet.sprite);
 
         class Shell {
-            constructor(altitude) {
-                this.id = Math.random();
+            constructor(alt) {
+                this.sprite = new PIXI.Sprite(shellTexture);
+                this.sprite.anchor.set(0.5);
                 this.x = Math.random() * width;
                 this.y = height + 50;
-                this.speed = height * (1.2 + Math.min(altitude / 10000, 0.5));
-                this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                this.speed = height * (1.2 + Math.min(alt / 10000, 0.5));
+                this.colorHex = COLORS[Math.floor(Math.random() * COLORS.length)];
+                this.sprite.tint = this.colorHex;
                 this.life = 1.5 + Math.random() * 1.5;
                 this.maxLife = this.life;
                 this.radius = 8;
                 this.dead = false;
-                this.isChaser = false;
+                
+                // Outer ring to show fuse
+                this.ring = new PIXI.Graphics();
+                this.sprite.addChild(this.ring);
+                entitiesContainer.addChild(this.sprite);
             }
             update(dt) {
                 this.y -= this.speed * dt;
                 this.life -= dt;
+                
+                this.sprite.x = this.x;
+                this.sprite.y = this.y;
+                
+                // Draw fuse
+                this.ring.clear();
+                this.ring.lineStyle(2, 0xFFFFFF, 1);
+                this.ring.arc(0, 0, this.radius + 6, -Math.PI/2, -Math.PI/2 + (this.life / this.maxLife) * Math.PI * 2);
+                
+                // Trail
+                if (Math.random() < 0.3) {
+                    spawnFragment(this.x, this.y + 10, (Math.random()-0.5)*20, 100, this.colorHex, 0.3, 0.2);
+                }
+
                 if (this.life <= 0) {
                     this.dead = true;
                     this.detonate();
@@ -265,145 +395,65 @@
             }
             detonate() {
                 const type = altitude < 1000 ? 'ring' : (altitude < 2000 ? (Math.random() < 0.6 ? 'ring' : 'spiral') : (Math.random() < 0.4 ? 'ring' : (Math.random() < 0.7 ? 'spiral' : 'willow')));
-                spawnBurst(this.x, this.y, this.color, type);
+                spawnBurst(this.x, this.y, this.colorHex, type);
             }
-            draw() {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-
-                // Shell
-                ctx.beginPath();
-                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
-                ctx.fillStyle = this.color;
-                ctx.fill();
-
-                // Fuse ring
-                ctx.beginPath();
-                ctx.arc(0, 0, this.radius + 6, -Math.PI/2, -Math.PI/2 + (this.life / this.maxLife) * Math.PI * 2);
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                ctx.restore();
+            destroy() {
+                this.sprite.destroy({children: true});
             }
         }
 
-        class Fragment {
-            constructor(x, y, vx, vy, color, type) {
-                this.x = x;
-                this.y = y;
-                this.vx = vx;
-                this.vy = vy;
-                this.color = color;
-                this.type = type; // ring, spiral, willow, sparkle
-                this.life = 2.5 + Math.random() * 1.5;
-                this.maxLife = this.life;
-                this.radius = height * 0.012;
-                this.history = [];
-                this.dead = false;
-            }
-            update(dt) {
-                this.history.push({x: this.x, y: this.y});
-                if (this.history.length > 10) this.history.shift();
-
-                if (this.type === 'willow' || this.type === 'sparkle') {
-                    this.vy += 200 * dt; // gravity
-                }
-
-                this.x += this.vx * dt;
-                this.y += this.vy * dt;
-                this.life -= dt;
-                if (this.life <= 0) this.dead = true;
-            }
-            draw() {
-                const alpha = Math.min(1, this.life * 2);
-                ctx.save();
-                ctx.globalCompositeOperation = 'lighter';
-
-                // Trail
-                if (this.history.length > 1) {
-                    ctx.beginPath();
-                    ctx.moveTo(this.history[0].x, this.history[0].y);
-                    for (let i = 1; i < this.history.length; i++) {
-                        ctx.lineTo(this.history[i].x, this.history[i].y);
-                    }
-                    ctx.strokeStyle = this.color;
-                    ctx.globalAlpha = alpha * 0.3;
-                    ctx.lineWidth = this.type === 'sparkle' ? 1 : 2;
-                    ctx.stroke();
-                }
-
-                // Fragment
-                if (this.type !== 'sparkle') {
-                    ctx.beginPath();
-                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                    ctx.fillStyle = '#fff';
-                    ctx.shadowBlur = 5;
-                    ctx.shadowColor = this.color;
-                    ctx.globalAlpha = alpha;
-                    ctx.fill();
-                } else {
-                    ctx.fillStyle = this.color;
-                    ctx.globalAlpha = alpha;
-                    ctx.fillRect(this.x - 1, this.y - 1, 2, 2);
-                }
-
-                ctx.restore();
-            }
-        }
-
-        let comet = new Comet();
-        let shells = [];
-        let fragments = [];
-        let sparkles = [];
-        let stars = [];
-        let spawnTimer = 0;
-        let score = 0;
-
-        function initStars() {
-            stars = Array.from({length: 100}, () => ({
-                x: Math.random() * width,
-                y: Math.random() * height,
-                z: Math.random() * 0.5 + 0.1,
-                size: Math.random() * 2
-            }));
+        function spawnFragment(x, y, vx, vy, color, life, scale=0.5, gravity=0, drag=0.98) {
+            const f = {
+                sprite: new PIXI.Sprite(particleTexture),
+                x, y, vx, vy, life, maxLife: life, gravity, drag
+            };
+            f.sprite.anchor.set(0.5);
+            f.sprite.tint = color;
+            f.sprite.scale.set(scale);
+            f.sprite.x = x;
+            f.sprite.y = y;
+            fragmentsContainer.addChild(f.sprite);
+            fragments.push(f);
         }
 
         function spawnBurst(x, y, color, type) {
-            playPop();
-            if (!prefersReducedMotion) shake = Math.max(shake, 5);
-            const count = Math.floor((16 + Math.floor(Math.random() * 16)) * (1 + Math.min(altitude / 3000, 1) * 0.25));
+            // Pan based on X position
+            let pan = (x / width) * 2 - 1;
+            sounds.pop.pos(pan, 0, 0); // basic 3D panning via Howler
+            sounds.pop.play();
+
+            if (!prefersReducedMotion) shake = Math.max(shake, 10);
+            
+            // Massively increased particle count due to PixiJS WebGL
+            const count = Math.floor((150 + Math.floor(Math.random() * 200)) * (1 + Math.min(altitude / 3000, 1) * 0.25));
             const speed = height * 0.35 * (1 + Math.min(altitude / 3000, 1) * 0.08);
 
             if (type === 'ring') {
                 for (let i = 0; i < count; i++) {
                     const angle = (i / count) * Math.PI * 2;
-                    fragments.push(new Fragment(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed, color, 'ring'));
+                    const rSpeed = speed * (0.8 + Math.random()*0.2);
+                    spawnFragment(x, y, Math.cos(angle) * rSpeed, Math.sin(angle) * rSpeed, color, 1.5 + Math.random(), 0.6, 50, 0.95);
                 }
             } else if (type === 'spiral') {
-                const arms = 2 + Math.floor(Math.random() * 3);
+                const arms = 3 + Math.floor(Math.random() * 3);
                 for (let a = 0; a < arms; a++) {
                     const offset = (a / arms) * Math.PI * 2;
                     for (let i = 0; i < count / arms; i++) {
-                        const angle = offset + (i / (count / arms)) * Math.PI * 0.5;
-                        const s = speed * (0.5 + 0.5 * (i / (count / arms)));
-                        fragments.push(new Fragment(x, y, Math.cos(angle) * s, Math.sin(angle) * s, color, 'spiral'));
+                        const angle = offset + (i / (count / arms)) * Math.PI * 1.5;
+                        const s = speed * (0.2 + 0.8 * (i / (count / arms)));
+                        spawnFragment(x, y, Math.cos(angle) * s, Math.sin(angle) * s, color, 1.5 + Math.random(), 0.5, 0, 0.96);
                     }
                 }
             } else if (type === 'willow') {
                 for (let i = 0; i < count; i++) {
                     const angle = Math.random() * Math.PI * 2;
-                    const s = speed * (0.4 + Math.random() * 0.6);
-                    fragments.push(new Fragment(x, y, Math.cos(angle) * s, Math.sin(angle) * s, color, 'willow'));
+                    const s = speed * (0.3 + Math.random() * 0.7);
+                    spawnFragment(x, y, Math.cos(angle) * s, Math.sin(angle) * s, color, 2.0 + Math.random(), 0.4, 300, 0.92); // high gravity
                 }
             }
 
-            // Decorative sparkles
-            for (let i = 0; i < 50; i++) {
-                const angle = Math.random() * Math.PI * 2;
-                const s = speed * Math.random() * 1.5;
-                sparkles.push(new Fragment(x, y, Math.cos(angle) * s, Math.sin(angle) * s, color, 'sparkle'));
-            }
+            // Central flash
+            spawnFragment(x, y, 0, 0, 0xFFFFFF, 0.2, 3.0, 0, 1);
         }
 
         try {
@@ -411,24 +461,15 @@
             bestScoreEl.textContent = `BEST ${bestAltitude}m`;
         } catch (e) {}
 
-        function resize() {
-            dpr = window.devicePixelRatio || 1;
+        window.addEventListener('resize', () => {
             width = window.innerWidth;
             height = window.innerHeight;
-            canvas.width = width * dpr;
-            canvas.height = height * dpr;
-            canvas.style.width = width + 'px';
-            canvas.style.height = height + 'px';
-            ctx.scale(dpr, dpr);
-        }
-
-        window.addEventListener('resize', () => {
-            resize();
             initStars();
         });
-        resize();
         initStars();
+        comet.reset();
 
+        // Input Handling
         const keys = {};
         window.addEventListener('keydown', e => {
             keys[e.code] = true;
@@ -449,7 +490,6 @@
                 comet.targetY = e.clientY;
                 isTouchOffsetApplied = false;
             } else {
-                // Touch relative movement
                 const dx = (e.clientX - touchStartX) * 1.5;
                 const dy = (e.clientY - touchStartY) * 1.5;
                 comet.targetX = cometStartX + dx;
@@ -466,32 +506,42 @@
             if (e.pointerType !== 'mouse') {
                 touchStartX = e.clientX;
                 touchStartY = e.clientY;
-
                 cometStartX = comet.targetX;
                 cometStartY = comet.targetY + (isTouchOffsetApplied ? TOUCH_OFFSET : 0);
-
-                // Immediate jump for better responsiveness
                 comet.targetY = cometStartY - TOUCH_OFFSET;
                 isTouchOffsetApplied = true;
             }
         });
 
-        // Prevent scrolling on touch
         window.addEventListener('touchmove', e => e.preventDefault(), {passive: false});
 
-        function update(dt) {
-            if (!gameActive) return;
+        // Game Loop
+        app.ticker.add((deltaFrames) => {
+            const dt = Math.min(app.ticker.deltaMS / 1000, 0.1);
+            
+            if (!gameActive) {
+                comet.update(dt);
+                return;
+            }
 
             if (hitStop > 0) {
                 hitStop -= dt;
                 return;
             }
 
-            if (flash > 0) flash -= dt;
-            if (shake > 0) shake -= dt * 10;
+            if (shake > 0) {
+                shake -= dt * 30;
+                if (!prefersReducedMotion) {
+                    worldContainer.x = (Math.random() - 0.5) * shake;
+                    worldContainer.y = (Math.random() - 0.5) * shake;
+                }
+            } else {
+                worldContainer.x = 0;
+                worldContainer.y = 0;
+            }
 
-            const climbRate = 90; // m/s
-            const scrollSpeed = height * 0.25; // pixels/s
+            const climbRate = 90; 
+            const scrollSpeed = height * 0.25;
 
             // Keyboard steering
             const kSpeed = height * 1.0;
@@ -502,12 +552,10 @@
 
             comet.update(dt);
 
-            // Multiplier decay
             if (performance.now() - lastStealTime > 5000) {
                 stealMultiplier = 1;
             }
 
-            // Save history for chasing bursts (store world position)
             history.push({
                 x: comet.x,
                 y: comet.y - altitude * (scrollSpeed / climbRate),
@@ -515,12 +563,11 @@
             });
             if (history.length > 500) history.shift();
 
-            // Scoring & Scrolling
             altitude += climbRate * dt;
             score = Math.floor(altitude);
             scoreEl.textContent = `${score}m`;
 
-            // Starfield
+            // Stars
             stars.forEach(s => {
                 s.y += scrollSpeed * 0.4 * s.z * dt * 10;
                 if (s.y > height) {
@@ -533,20 +580,24 @@
             shells.forEach(s => {
                 if (s.dead) return;
                 const dist = Math.hypot(comet.x - s.x, comet.y - s.y);
-                if (dist < comet.hitRadius + s.radius) {
-                    // Steal!
+                if (dist < comet.hitRadius + s.radius + 10) { // generous hitbox
                     s.dead = true;
                     altitude += 250 * stealMultiplier;
                     stealMultiplier++;
                     lastStealTime = performance.now();
-                    flash = 0.08;
-                    hitStop = 0.09;
-                    shake = 10;
-                    playSteal();
+                    hitStop = 0.05;
+                    shake = 15;
+                    
+                    let pan = (comet.x / width) * 2 - 1;
+                    sounds.steal.pos(pan, 0, 0);
+                    sounds.steal.play();
+
+                    flashEl.style.opacity = '0.3';
+                    setTimeout(() => { flashEl.style.opacity = '0'; }, 50);
 
                     // Delayed chasing burst
                     const theftTime = performance.now();
-                    const targetT = theftTime - 400; // where you were 0.4s ago
+                    const targetT = theftTime - 400;
                     let bestP = history[0];
                     for (let p of history) {
                         if (Math.abs(p.t - targetT) < Math.abs(bestP.t - targetT)) bestP = p;
@@ -556,13 +607,11 @@
                     const worldX = bestP.x;
 
                     const bt = setTimeout(() => {
-                        // Remove from tracking array
                         burstTimeouts = burstTimeouts.filter(id => id !== bt);
                         if (!gameActive) return;
-                        // Calculate current screen Y from world Y
                         const currentScreenY = worldY + altitude * (scrollSpeed / climbRate);
-                        spawnBurst(worldX, currentScreenY, s.color, 'ring');
-                    }, 2500);
+                        spawnBurst(worldX, currentScreenY, s.colorHex, 'ring');
+                    }, 2000);
                     burstTimeouts.push(bt);
                 }
             });
@@ -570,58 +619,70 @@
             // Spawning
             spawnTimer -= dt;
             if (spawnTimer <= 0) {
-                const maxShells = Math.min(5, 1 + Math.floor(altitude / 500));
-                const interval = Math.max(0.4, (0.8 + Math.random() * 1.2) * Math.pow(0.9, altitude / 500));
+                const maxShells = Math.min(8, 2 + Math.floor(altitude / 500));
+                const interval = Math.max(0.3, (0.7 + Math.random() * 1.0) * Math.pow(0.9, altitude / 500));
 
-                if (shells.filter(s => !s.isChaser).length < maxShells) {
-                    const s = new Shell(altitude);
-                    s.y = height + 100; // start below screen
-                    shells.push(s);
+                if (shells.length < maxShells) {
+                    shells.push(new Shell(altitude));
                 }
                 spawnTimer = interval;
             }
 
-            // Updates
             const dy = scrollSpeed * dt;
-            shells.forEach(s => {
-                s.y += dy; // world scroll
+            
+            for (let i = shells.length - 1; i >= 0; i--) {
+                let s = shells[i];
+                s.y += dy;
                 s.update(dt);
-            });
-            fragments.forEach(f => {
-                f.y += dy; // world scroll
-                f.update(dt);
-            });
-            sparkles.forEach(s => {
-                s.y += dy; // world scroll
-                s.update(dt);
-            });
-
-            // Cleanup
-            shells = shells.filter(s => !s.dead && s.y > -200 && s.y < height + 500);
-            fragments = fragments.filter(f => !f.dead && f.y > -200 && f.y < height + 500);
-            sparkles = sparkles.filter(s => !s.dead && s.y > -200 && s.y < height + 500);
-
-            // Death collision
-            for (let f of fragments) {
-                const d = Math.hypot(comet.x - f.x, comet.y - f.y);
-                if (d < comet.hitRadius + f.radius) {
-                    gameOver();
-                    break;
+                if (s.dead || s.y < -200 || s.y > height + 500) {
+                    s.destroy();
+                    shells.splice(i, 1);
                 }
             }
-        }
+
+            for (let i = fragments.length - 1; i >= 0; i--) {
+                let f = fragments[i];
+                f.vy += f.gravity * dt;
+                f.vx *= Math.pow(f.drag, dt * 60);
+                f.vy *= Math.pow(f.drag, dt * 60);
+                f.x += f.vx * dt;
+                f.y += f.vy * dt + dy; // scroll
+                f.life -= dt;
+                
+                f.sprite.x = f.x;
+                f.sprite.y = f.y;
+                f.sprite.alpha = Math.min(1, f.life * 2);
+
+                if (f.life <= 0 || f.y > height + 200) {
+                    fragmentsContainer.removeChild(f.sprite);
+                    fragments.splice(i, 1);
+                    continue;
+                }
+
+                // Death collision (fragments are deadly)
+                const d = Math.hypot(comet.x - f.x, comet.y - f.y);
+                // Hitbox based on scale
+                if (d < comet.hitRadius + 6 * f.sprite.scale.x) {
+                    gameOver();
+                }
+            }
+        });
 
         function gameOver() {
             if (!gameActive) return;
             gameActive = false;
+            
+            sounds.pop.pos(0,0,0);
+            sounds.pop.play();
 
             // Shatter effect
-            for (let i = 0; i < 50; i++) {
+            for (let i = 0; i < 200; i++) {
                 const angle = Math.random() * Math.PI * 2;
-                const s = 200 * Math.random();
-                sparkles.push(new Fragment(comet.x, comet.y, Math.cos(angle) * s, Math.sin(angle) * s, '#fff', 'sparkle'));
+                const s = 400 * Math.random();
+                spawnFragment(comet.x, comet.y, Math.cos(angle) * s, Math.sin(angle) * s, 0xFFFFFF, 2.0, 0.8, 100, 0.9);
             }
-            shake = 20;
+            shake = 30;
+            comet.sprite.alpha = 0; // hide comet
 
             if (altitude > bestAltitude) {
                 bestAltitude = Math.floor(altitude);
@@ -635,59 +696,18 @@
             <span style="font-size: 14px; font-weight: normal; color: var(--accent-cyan); display: block; margin: 10px 0;">STEAL SHELLS TO CLIMB. AVOID THE BURSTS.</span>
             <span style="font-size: 16px; font-weight: normal; color: #8a90a6;">tap or press any key to try again</span>`;
 
-            // Short delay before allowing restart to prevent accidental double-tap
             gameOverTimeout = setTimeout(() => {
                 overlayEl.classList.remove('hidden');
             }, 500);
         }
 
-        function draw() {
-            ctx.fillStyle = '#07080f';
-            ctx.fillRect(0, 0, width, height);
-
-            ctx.save();
-            if (shake > 0 && !prefersReducedMotion) {
-                ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
-            }
-
-            // Stars
-            ctx.fillStyle = '#fff';
-            stars.forEach(s => {
-                ctx.globalAlpha = s.z;
-                ctx.fillRect(s.x, s.y, s.size, s.size);
-            });
-            ctx.globalAlpha = 1;
-
-            sparkles.forEach(s => s.draw());
-            shells.forEach(s => s.draw());
-            fragments.forEach(f => f.draw());
-            comet.draw();
-
-            ctx.restore();
-
-            if (flash > 0 && !prefersReducedMotion) {
-                ctx.fillStyle = `rgba(255, 255, 255, ${flash * 10})`;
-                ctx.fillRect(0, 0, width, height);
-            }
-        }
-
-        function loop(timestamp) {
-            const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
-            lastTime = timestamp;
-
-            update(dt);
-            draw();
-
-            requestAnimationFrame(loop);
-        }
-
-        requestAnimationFrame(loop);
-
         function start() {
             if (gameActive) return;
-            initAudio();
+            // Howler.js automatically handles Web Audio API unlocks on first interaction!
+            
             gameActive = true;
             overlayEl.classList.add('hidden');
+            comet.sprite.alpha = 1;
 
             clearTimeout(gameOverTimeout);
             burstTimeouts.forEach(t => clearTimeout(t));
@@ -696,18 +716,16 @@
             altitude = 0;
             stealMultiplier = 1;
             lastStealTime = performance.now();
+            
+            shells.forEach(s => s.destroy());
             shells = [];
+            
+            fragments.forEach(f => fragmentsContainer.removeChild(f.sprite));
             fragments = [];
-            sparkles = [];
+            
             history = [];
             comet.reset();
         }
-
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
-                lastTime = performance.now();
-            }
-        });
     </script>
 </body>
 </html>

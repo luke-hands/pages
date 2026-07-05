@@ -100,6 +100,20 @@
             cursor: pointer;
         }
 
+        #pause-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 10vmin;
+            color: #fff;
+            text-shadow: 0 0 20px var(--well-ui);
+            display: none;
+            pointer-events: none;
+            font-weight: bold;
+            letter-spacing: 1vmin;
+        }
+
         @media (pointer: coarse) {
             .top-bar {
                 font-size: 5vmin;
@@ -132,14 +146,15 @@
             <div id="energy-bar"></div>
         </div>
         <div id="overlay">
-            <h1 id="overlay-title">SINGULARITY COMMAND</h1>
-            <p id="overlay-msg">
+            <h1>SINGULARITY COMMAND</h1>
+            <p>
                 DEFEND THE CITIES<br>
                 HOLD TO ATTRACT MISSILES<br>
                 ENERGY DRAINS WHILE ACTIVE<br><br>
                 TAP TO START
             </p>
         </div>
+        <div id="pause-indicator">PAUSED</div>
     </div>
 
     <script>
@@ -150,6 +165,15 @@
             city: '#46c8ff',
             trail: '#46c8ff',
             missile: '#ff6ec7'
+        };
+
+        // DOM Elements
+        const el = {
+            energyBar: document.getElementById('energy-bar'),
+            score: document.getElementById('score'),
+            best: document.getElementById('best'),
+            overlay: document.getElementById('overlay'),
+            pause: document.getElementById('pause-indicator')
         };
 
         // Game State
@@ -174,7 +198,8 @@
             waveMissilesRemaining: 0,
             spawnTimer: 0,
             chainMultiplier: 1,
-            lastSwallowTime: 0
+            lastSwallowTime: 0,
+            timeScaleTimeout: null
         };
 
         // Initialization
@@ -250,6 +275,9 @@
 
             if (!state.isPaused) {
                 update(dt);
+                el.pause.style.display = 'none';
+            } else {
+                el.pause.style.display = 'block';
             }
             draw();
 
@@ -278,13 +306,12 @@
                 state.energy += dt / 4.0; // Refills in 4s
                 if (state.energy > 1) state.energy = 1;
             }
-            document.getElementById('energy-bar').style.width = (state.energy * 100) + '%';
+            el.energyBar.style.width = (state.energy * 100) + '%';
 
             updateWell(dt);
             updateMissiles(dt);
             updateStars(dt);
             updateParticles(dt);
-            checkCollisions();
             checkWaveProgress(dt);
         }
 
@@ -392,7 +419,8 @@
                         m.vy += (dy / dist) * a * dt;
 
                         // Swallow check
-                        if (dist < state.well.coreRadius) {
+                        const missileSpeed = Math.hypot(m.vx, m.vy);
+                        if (dist < state.well.coreRadius + (missileSpeed * dt * 0.5)) {
                             swallowMissile(i);
                             continue;
                         }
@@ -505,7 +533,7 @@
 
             let hitCity = false;
             for (const c of state.cities) {
-                if (c.alive && Math.abs(m.x - c.x) < c.radius) {
+                if (c.alive && Math.hypot(m.x - c.x, m.y - state.vh) < c.radius) {
                     c.alive = false;
                     hitCity = true;
                     shatterCity(c);
@@ -529,8 +557,8 @@
                 if (state.spawnTimer <= 0) {
                     if (state.wave >= 6 && Math.random() < 0.4) {
                         // Multi-vector volleys
-                        spawnMissile('left');
-                        spawnMissile('right');
+                        if (state.waveMissilesRemaining > 0) spawnMissile('left');
+                        if (state.waveMissilesRemaining > 0) spawnMissile('right');
                         state.spawnTimer = 0.8 + Math.random() * 1.2;
                     } else {
                         spawnMissile();
@@ -552,10 +580,10 @@
         }
 
         function updateScoreUI() {
-            document.getElementById('score').textContent = `SCORE: ${state.score}`;
+            el.score.textContent = `SCORE: ${state.score}`;
             if (state.score > state.best) {
                 state.best = state.score;
-                document.getElementById('best').textContent = `BEST: ${state.best}`;
+                el.best.textContent = `BEST: ${state.best}`;
                 try { localStorage.setItem('singularity_best', state.best); } catch(e){}
             }
         }
@@ -563,9 +591,11 @@
         function checkGameOver() {
             if (state.cities.every(c => !c.alive)) {
                 state.isGameOver = true;
-                document.getElementById('overlay-title').textContent = 'GAME OVER';
-                document.getElementById('overlay-msg').innerHTML = 'TAP TO RESTART';
-                document.getElementById('overlay').style.display = 'block';
+                const overlayH1 = el.overlay.querySelector('h1');
+                const overlayP = el.overlay.querySelector('p');
+                overlayH1.textContent = 'GAME OVER';
+                overlayP.innerHTML = 'TAP TO RESTART';
+                el.overlay.style.display = 'block';
             }
         }
 
@@ -577,10 +607,6 @@
                 p.life -= dt / p.maxLife;
                 if (p.life <= 0) state.particles.splice(i, 1);
             }
-        }
-
-        function checkCollisions() {
-            // Primarily handled in updateMissiles for efficiency
         }
 
         function createShockwave(x, y) {
@@ -631,17 +657,20 @@
         }
 
         function hitStop() {
-            const originalScale = state.timeScale;
+            if (state.timeScaleTimeout) clearTimeout(state.timeScaleTimeout);
             state.timeScale = 0;
-            setTimeout(() => {
-                if (!state.isGameOver) state.timeScale = originalScale;
+            state.timeScaleTimeout = setTimeout(() => {
+                if (!state.isGameOver) state.timeScale = 1.0;
+                state.timeScaleTimeout = null;
             }, 50);
         }
 
         function slowMo(duration) {
+            if (state.timeScaleTimeout) clearTimeout(state.timeScaleTimeout);
             state.timeScale = 0.3;
-            setTimeout(() => {
+            state.timeScaleTimeout = setTimeout(() => {
                 if (!state.isGameOver) state.timeScale = 1.0;
+                state.timeScaleTimeout = null;
             }, duration);
         }
 
@@ -796,7 +825,7 @@
 
             if (!state.isStarted) {
                 state.isStarted = true;
-                document.getElementById('overlay').style.display = 'none';
+                el.overlay.style.display = 'none';
             }
             if (state.isGameOver) {
                 restart();
@@ -833,6 +862,10 @@
         window.addEventListener('pointermove', e => handleMove(e.clientX, e.clientY, e.pointerType));
         window.addEventListener('pointerup', handleEnd);
         window.addEventListener('pointercancel', handleEnd);
+        window.addEventListener('blur', () => {
+            handleEnd();
+            state.isPaused = true;
+        });
 
         window.addEventListener('keydown', e => {
             if (e.code === 'Space' && state.isGameOver) restart();
@@ -840,7 +873,10 @@
         });
 
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden) state.isPaused = true;
+            state.isPaused = document.hidden;
+            if (!document.hidden) {
+                state.lastTime = performance.now();
+            }
         });
 
         function restart() {
@@ -854,16 +890,22 @@
             state.well = null;
             state.timeScale = 1.0;
             state.shake = 0;
+            state.chainMultiplier = 1;
+            state.lastSwallowTime = 0;
+            if (state.timeScaleTimeout) {
+                clearTimeout(state.timeScaleTimeout);
+                state.timeScaleTimeout = null;
+            }
             initCities();
             startWave();
             updateScoreUI();
-            document.getElementById('overlay').style.display = 'none';
+            el.overlay.style.display = 'none';
         }
 
         // Load Best Score
         try {
             state.best = parseInt(localStorage.getItem('singularity_best')) || 0;
-            document.getElementById('best').textContent = `BEST: ${state.best}`;
+            el.best.textContent = `BEST: ${state.best}`;
         } catch (e) {}
 
         startWave();

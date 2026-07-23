@@ -42,9 +42,30 @@
   .score-container {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     font-size: 1.2rem;
     font-weight: bold;
     text-shadow: 0 0 10px rgba(70, 200, 255, 0.5);
+  }
+  .difficulty-badge {
+    font-size: 0.8rem;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid currentColor;
+    text-shadow: none;
+    box-shadow: 0 0 10px currentColor;
+    text-transform: uppercase;
+  }
+  .difficulty-badge.easy {
+    color: var(--cyan);
+  }
+  .difficulty-badge.medium {
+    color: var(--violet);
+  }
+  .difficulty-badge.hard {
+    color: var(--pink);
   }
   #restart-prompt {
     position: absolute;
@@ -153,8 +174,60 @@
     font-size: 0.9rem;
     color: white;
     opacity: 0.8;
-    margin-bottom: 3rem;
+    margin-bottom: 1.5rem;
     letter-spacing: 0.05em;
+  }
+  .difficulty-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+  }
+  .difficulty-label {
+    font-size: 0.8rem;
+    color: var(--violet);
+    font-weight: bold;
+    letter-spacing: 0.15em;
+  }
+  .difficulty-buttons {
+    display: flex;
+    gap: 0.8rem;
+  }
+  .diff-btn {
+    background: transparent;
+    border: 2px solid rgba(124, 108, 255, 0.3);
+    color: rgba(255, 255, 255, 0.6);
+    padding: 0.5rem 1.2rem;
+    font-size: 0.9rem;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+  }
+  .diff-btn:hover {
+    color: white;
+    border-color: rgba(124, 108, 255, 0.8);
+    background: rgba(124, 108, 255, 0.1);
+  }
+  .diff-btn.active[data-diff="easy"] {
+    color: white;
+    border-color: var(--cyan);
+    background: rgba(70, 200, 255, 0.2);
+    box-shadow: 0 0 15px rgba(70, 200, 255, 0.4);
+  }
+  .diff-btn.active[data-diff="medium"] {
+    color: white;
+    border-color: var(--violet);
+    background: rgba(124, 108, 255, 0.2);
+    box-shadow: 0 0 15px rgba(124, 108, 255, 0.4);
+  }
+  .diff-btn.active[data-diff="hard"] {
+    color: white;
+    border-color: var(--pink);
+    background: rgba(255, 110, 199, 0.2);
+    box-shadow: 0 0 15px rgba(255, 110, 199, 0.4);
   }
   #start-prompt {
     font-size: 1.5rem;
@@ -175,6 +248,7 @@
 <div id="ui">
   <div class="score-container">
     <div id="current-score">Score: 0</div>
+    <div id="difficulty-badge" class="difficulty-badge hard">HARD</div>
     <div id="best-score">Best: 0</div>
   </div>
   <div class="multiplier-display" id="multiplier-ui">
@@ -200,6 +274,14 @@
       </div>
     </div>
     <div class="goal">GRAZE EDGES TO MULTIPLY</div>
+    <div class="difficulty-container">
+      <div class="difficulty-label">DIFFICULTY</div>
+      <div class="difficulty-buttons">
+        <button class="diff-btn" data-diff="easy">EASY</button>
+        <button class="diff-btn" data-diff="medium">MEDIUM</button>
+        <button class="diff-btn active" data-diff="hard">HARD</button>
+      </div>
+    </div>
     <div id="start-prompt" class="pulse">Tap or Space to Start</div>
   </div>
 </div>
@@ -220,6 +302,12 @@
 
   let width, height, dpr;
   let score = 0, bestScore = 0;
+  let currentDifficulty = 'hard';
+  let bestScores = {
+    easy: 0,
+    medium: 0,
+    hard: 0
+  };
   let prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let gameActive = false, gameOver = false, paused = false;
   let lastTime = 0, gameElapsed = 0, vTime = 0, hitStop = 0;
@@ -250,6 +338,36 @@
 
   let scrollX = 0, scrollSpeed = 0.45, gapHeight = 0.48, caveParams = [];
 
+  const DIFFICULTY_SETTINGS = {
+    easy: {
+      initSpeed: 0.30,
+      maxSpeed: 0.50,
+      speedGrowth: 1.008,
+      initGap: 0.60,
+      minGap: 0.32,
+      shrinkDuration: 150,
+      ampScale: 0.50
+    },
+    medium: {
+      initSpeed: 0.38,
+      maxSpeed: 0.68,
+      speedGrowth: 1.011,
+      initGap: 0.54,
+      minGap: 0.24,
+      shrinkDuration: 120,
+      ampScale: 0.75
+    },
+    hard: {
+      initSpeed: 0.45,
+      maxSpeed: 0.85,
+      speedGrowth: 1.015,
+      initGap: 0.34,
+      minGap: 0.17,
+      shrinkDuration: 90,
+      ampScale: 1.00
+    }
+  };
+
   const COLORS = ['#7c6cff', '#46c8ff', '#46c8ff', '#ff6ec7', '#ffffff'];
   const UI = {
     score: document.getElementById('current-score'),
@@ -257,7 +375,8 @@
     multText: document.getElementById('multiplier-text'),
     meter: document.getElementById('meter-fill'),
     restart: document.getElementById('restart-prompt'),
-    start: document.getElementById('start-screen')
+    start: document.getElementById('start-screen'),
+    badge: document.getElementById('difficulty-badge')
   };
 
   let audioCtx;
@@ -273,12 +392,16 @@
   }
 
   function initCave() {
+    const settings = DIFFICULTY_SETTINGS[currentDifficulty] || DIFFICULTY_SETTINGS.hard;
+    const scale = settings.ampScale;
     caveParams = [
-      { amp: 0.08 + Math.random() * 0.04, freq: 0.4 + Math.random() * 0.2, phase: Math.random() * Math.PI * 2 },
-      { amp: 0.04 + Math.random() * 0.02, freq: 1.0 + Math.random() * 0.5, phase: Math.random() * Math.PI * 2 },
-      { amp: 0.01 + Math.random() * 0.01, freq: 2.5 + Math.random() * 1.0, phase: Math.random() * Math.PI * 2 }
+      { amp: (0.08 + Math.random() * 0.04) * scale, freq: 0.4 + Math.random() * 0.2, phase: Math.random() * Math.PI * 2 },
+      { amp: (0.04 + Math.random() * 0.02) * scale, freq: 1.0 + Math.random() * 0.5, phase: Math.random() * Math.PI * 2 },
+      { amp: (0.01 + Math.random() * 0.01) * scale, freq: 2.5 + Math.random() * 1.0, phase: Math.random() * Math.PI * 2 }
     ];
-    scrollX = 0; scrollSpeed = 0.45; gapHeight = 0.48;
+    scrollX = 0;
+    scrollSpeed = settings.initSpeed;
+    gapHeight = settings.initGap;
   }
 
   function getCenterline(x) {
@@ -291,8 +414,26 @@
   }
 
   try {
-    const saved = localStorage.getItem('comet-graze-best');
-    if (saved) bestScore = parseInt(saved, 10) || 0;
+    const savedEasy = localStorage.getItem('comet-graze-best-easy');
+    if (savedEasy) bestScores.easy = parseInt(savedEasy, 10) || 0;
+
+    const savedMedium = localStorage.getItem('comet-graze-best-medium');
+    if (savedMedium) bestScores.medium = parseInt(savedMedium, 10) || 0;
+
+    const savedHard = localStorage.getItem('comet-graze-best-hard');
+    const legacySaved = localStorage.getItem('comet-graze-best');
+    if (savedHard) {
+      bestScores.hard = parseInt(savedHard, 10) || 0;
+    } else if (legacySaved) {
+      bestScores.hard = parseInt(legacySaved, 10) || 0;
+      localStorage.setItem('comet-graze-best-hard', legacySaved);
+    }
+
+    const savedDiff = localStorage.getItem('comet-graze-difficulty');
+    if (savedDiff && ['easy', 'medium', 'hard'].includes(savedDiff)) {
+      currentDifficulty = savedDiff;
+    }
+    bestScore = bestScores[currentDifficulty];
     UI.best.textContent = `Best: ${bestScore}`;
   } catch (e) {}
 
@@ -313,6 +454,7 @@
   }
 
   function handleDown(e) {
+    if (e && e.target && e.target.closest('.diff-btn')) return;
     if (e) e.preventDefault();
     initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     if (!gameActive && !paused && !gameOver) {
@@ -323,6 +465,53 @@
     isPressing = true;
   }
   function handleUp(e) { if (e) e.preventDefault(); isPressing = false; }
+
+  // Set up difficulty buttons event handling
+  const diffButtons = document.querySelectorAll('.diff-btn');
+  diffButtons.forEach(btn => {
+    // We want to handle both click and touchend on buttons
+    const selectDifficulty = (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // Stop propagation so we don't trigger game start
+
+      const newDiff = btn.getAttribute('data-diff');
+      if (['easy', 'medium', 'hard'].includes(newDiff)) {
+        currentDifficulty = newDiff;
+        bestScore = bestScores[currentDifficulty];
+
+        // Update active class
+        diffButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Update header UI
+        UI.best.textContent = `Best: ${bestScore}`;
+        UI.badge.textContent = currentDifficulty;
+        UI.badge.className = `difficulty-badge ${currentDifficulty}`;
+
+        // Save choice
+        try {
+          localStorage.setItem('comet-graze-difficulty', currentDifficulty);
+        } catch (err) {}
+      }
+    };
+    btn.addEventListener('click', selectDifficulty);
+    btn.addEventListener('touchstart', selectDifficulty, {passive: false});
+  });
+
+  // To keep UI in sync with loaded saved difficulty
+  function syncDifficultyUI() {
+    diffButtons.forEach(btn => {
+      if (btn.getAttribute('data-diff') === currentDifficulty) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+    UI.best.textContent = `Best: ${bestScore}`;
+    UI.badge.textContent = currentDifficulty;
+    UI.badge.className = `difficulty-badge ${currentDifficulty}`;
+  }
+  syncDifficultyUI();
 
   window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat) handleDown(e); });
   window.addEventListener('keyup', (e) => { if (e.code === 'Space') handleUp(e); });
@@ -374,9 +563,10 @@
       return;
     }
     gameElapsed += dt;
-    scrollSpeed = 0.45 * Math.pow(1.015, Math.floor(gameElapsed / 5));
-    scrollSpeed = Math.min(scrollSpeed, 0.85);
-    gapHeight = 0.48 - (0.48 - 0.18) * Math.min(gameElapsed / 100, 1);
+    const settings = DIFFICULTY_SETTINGS[currentDifficulty] || DIFFICULTY_SETTINGS.hard;
+    scrollSpeed = settings.initSpeed * Math.pow(settings.speedGrowth, Math.floor(gameElapsed / 5));
+    scrollSpeed = Math.min(scrollSpeed, settings.maxSpeed);
+    gapHeight = settings.initGap - (settings.initGap - settings.minGap) * Math.min(gameElapsed / settings.shrinkDuration, 1);
     scrollX += scrollSpeed * dt;
     player.vy += (isPressing ? DIVE_ACCEL : CLIMB_ACCEL) * dt;
     player.vy = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, player.vy));
@@ -444,8 +634,15 @@
         dieTimeout = null;
     }, 600);
     if (score > bestScore) {
-        bestScore = Math.floor(score); UI.best.textContent = `Best: ${bestScore}`;
-        try { localStorage.setItem('comet-graze-best', bestScore); } catch (e) {}
+        bestScore = Math.floor(score);
+        bestScores[currentDifficulty] = bestScore;
+        UI.best.textContent = `Best: ${bestScore}`;
+        try {
+            localStorage.setItem(`comet-graze-best-${currentDifficulty}`, bestScore);
+            if (currentDifficulty === 'hard') {
+                localStorage.setItem('comet-graze-best', bestScore); // keep in sync with legacy key
+            }
+        } catch (e) {}
     }
   }
 

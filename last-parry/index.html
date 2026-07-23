@@ -154,8 +154,60 @@
             pointer-events: none;
         }
     </style>
+<style>
+  /* --- Back to Gallery Floating Button --- */
+  .back-to-gallery {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 99999;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(7, 8, 15, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 234, 242, 0.15);
+    border-radius: 999px;
+    color: #e8eaf2;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    pointer-events: auto;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  .back-to-gallery:hover {
+    background: rgba(124, 108, 255, 0.2);
+    border-color: rgba(124, 108, 255, 0.6);
+    color: #ffffff;
+    box-shadow: 0 0 15px rgba(124, 108, 255, 0.5);
+    transform: translateX(-50%) translateY(-1px);
+  }
+  .back-to-gallery:active {
+    transform: translateX(-50%) translateY(1px);
+  }
+  @media (max-width: 768px) {
+    .back-to-gallery {
+      top: 15px;
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .back-to-gallery {
+      transition: none;
+    }
+  }
+</style>
 </head>
 <body>
+    <a href="../index.html" class="back-to-gallery" aria-label="Back to Gallery">&larr; Back to Gallery</a>
+
     <div id="ui">
         <div class="stats">
             <div id="score">0</div>

@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="description" content="Plunder Run — sail a pirate galleon across sunlit seas, hunting treasure and dodging reefs.">
+<title>Plunder Run</title>
+<style>
+  :root {
+    --bg: #07080f;
+    --fg: #e8eaf2;
+    --muted: #8a90a6;
+    --accent-1: #7c6cff;
+    --accent-2: #46c8ff;
+    --accent-3: #ff6ec7;
+    --gold: #ffd766;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  canvas#sea {
+    position: fixed;
+    inset: 0;
+    display: block;
+    z-index: 0;
+  }
+
+  /* ---- HUD ---- */
+  #hud {
+    position: fixed;
+    top: 70px;
+    left: 20px;
+    z-index: 10;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .hud-panel {
+    background: rgba(7, 8, 15, 0.45);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 234, 242, 0.15);
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    width: fit-content;
+  }
+  #gold-display { color: var(--gold); text-shadow: 0 0 12px rgba(255, 215, 102, 0.45); }
+  #best-display { color: var(--muted); font-size: 12px; font-weight: 600; }
+  #sail-display { color: var(--accent-2); font-size: 12px; font-weight: 600; letter-spacing: 2px; }
+
+  #hull-display {
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    z-index: 10;
+    display: none;
+    background: rgba(7, 8, 15, 0.45);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 234, 242, 0.15);
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 17px;
+    letter-spacing: 4px;
+    pointer-events: none;
+  }
+  #hull-display span { color: var(--accent-3); text-shadow: 0 0 10px rgba(255, 110, 199, 0.6); }
+  #hull-display span.lost { color: rgba(232, 234, 242, 0.15); text-shadow: none; }
+
+  /* ---- Compass ---- */
+  #compass {
+    position: fixed;
+    bottom: 26px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    background: rgba(7, 8, 15, 0.45);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 234, 242, 0.18);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  #compass-arrow {
+    font-size: 22px;
+    color: var(--gold);
+    text-shadow: 0 0 10px rgba(255, 215, 102, 0.7);
+    transition: transform 0.1s linear;
+    line-height: 1;
+  }
+
+  /* ---- Overlays ---- */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    padding: 2rem;
+    background: radial-gradient(ellipse at center, rgba(7, 8, 15, 0.25), rgba(7, 8, 15, 0.65));
+  }
+  .overlay h1 {
+    font-size: clamp(2.6rem, 9vw, 4.5rem);
+    font-weight: 900;
+    letter-spacing: 2px;
+    background: linear-gradient(100deg, var(--fg) 20%, var(--gold) 50%, var(--accent-2) 80%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 4px 24px rgba(0, 0, 0, 0.8));
+  }
+  .overlay p {
+    color: var(--fg);
+    font-size: 1.05rem;
+    max-width: 460px;
+    line-height: 1.6;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  }
+  .overlay .controls-hint {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .overlay .prompt {
+    margin-top: 10px;
+    padding: 12px 28px;
+    border-radius: 999px;
+    background: rgba(255, 215, 102, 0.12);
+    border: 1px solid rgba(255, 215, 102, 0.4);
+    color: var(--gold);
+    font-weight: 700;
+    letter-spacing: 1px;
+    font-size: 0.95rem;
+    animation: prompt-pulse 1.6s ease-in-out infinite;
+    box-shadow: 0 0 24px rgba(255, 215, 102, 0.15);
+  }
+  @keyframes prompt-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.85; }
+    50%      { transform: scale(1.05); opacity: 1; }
+  }
+  .overlay .final-score {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--gold);
+    text-shadow: 0 0 18px rgba(255, 215, 102, 0.5);
+  }
+  .overlay .new-best {
+    color: var(--accent-3);
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 1px;
+  }
+  #game-over, #pause-screen { display: none; }
+
+  /* ---- Touch steer hints ---- */
+  .steer-hint {
+    position: fixed;
+    bottom: 90px;
+    z-index: 5;
+    font-size: 34px;
+    color: rgba(232, 234, 242, 0.25);
+    pointer-events: none;
+    display: none;
+  }
+  #steer-left  { left: 26px; }
+  #steer-right { right: 26px; }
+
+  .back-to-gallery {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 99999;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(7, 8, 15, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 234, 242, 0.15);
+    border-radius: 999px;
+    color: #e8eaf2;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    pointer-events: auto;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  .back-to-gallery:hover {
+    background: rgba(124, 108, 255, 0.2);
+    border-color: rgba(124, 108, 255, 0.6);
+    color: #ffffff;
+    box-shadow: 0 0 15px rgba(124, 108, 255, 0.5);
+    transform: translateX(-50%) translateY(-1px);
+  }
+  .back-to-gallery:active {
+    transform: translateX(-50%) translateY(1px);
+  }
+  @media (max-width: 768px) {
+    .back-to-gallery {
+      top: 15px;
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .back-to-gallery {
+      transition: none;
+    }
+    .overlay .prompt { animation: none; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+    <a href="../index.html" class="back-to-gallery" aria-label="Back to Gallery">&larr; Back to Gallery</a>
+
+<canvas id="sea"></canvas>
+
+<div id="hud">
+  <div class="hud-panel" id="gold-display">Gold: 0</div>
+  <div class="hud-panel" id="best-display">Best: 0</div>
+  <div class="hud-panel" id="sail-display">SAILS ▮▮▯</div>
+</div>
+<div id="hull-display"><span>♥</span><span>♥</span><span>♥</span></div>
+<div id="compass"><div id="compass-arrow">➤</div></div>
+
+<div id="steer-left" class="steer-hint">‹</div>
+<div id="steer-right" class="steer-hint">›</div>
+
+<div id="start-screen" class="overlay">
+  <h1>PLUNDER RUN</h1>
+  <p>Sail the sunlit seas and haul in as much treasure as your hold can bear. Mind the rocks — three strikes and she goes down.</p>
+  <p class="controls-hint" id="controls-hint">A / D or ← → to steer &nbsp;•&nbsp; W / S to trim sails &nbsp;•&nbsp; P to pause</p>
+  <div class="prompt" id="start-prompt">Press Space to Set Sail</div>
+</div>
+
+<div id="game-over" class="overlay">
+  <h1>SHE'S SUNK</h1>
+  <div class="final-score" id="final-score">Gold: 0</div>
+  <div class="new-best" id="new-best" style="display:none">☠ NEW BEST HAUL ☠</div>
+  <p class="controls-hint" id="over-best">Best: 0</p>
+  <div class="prompt" id="restart-prompt">Press Space to Sail Again</div>
+</div>
+
+<div id="pause-screen" class="overlay">
+  <h1>ANCHORED</h1>
+  <div class="prompt" id="pause-prompt">Press P to Resume</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { Water } from 'three/addons/objects/Water.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+
+// ------------------------------------------------------------------ constants
+const MAP_R = 450;             // playable ocean radius
+const MAX_SAIL = 3;            // sail trim levels
+const SPEED_PER_SAIL = 7.5;    // units/s per sail level
+const TURN_RATE = 0.85;        // rad/s at full speed
+const SHIP_R = 3.2;            // ship collision radius
+const CHEST_COUNT = 10;
+const COLLECT_R = 7;
+
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+// ------------------------------------------------------------------ state
+let state = 'menu';            // menu | playing | sinking | over
+let paused = false;
+let score = 0, bestScore = 0;
+let hull = 3;
+let sailLevel = 2;
+let heading = 0, speed = 0;
+let invuln = 0, shake = 0, sinkTimer = 0, overTimer = 0;
+let runStartBest = 0;          // best score before this run — for the "new best" banner
+let steerInput = 0;            // -1 .. 1
+let waterTime = Math.random() * 100;
+let lastTime = 0;
+
+try {
+  const saved = localStorage.getItem('plunder-run-best');
+  if (saved) bestScore = parseInt(saved, 10) || 0;
+} catch (e) {}
+
+// ------------------------------------------------------------------ UI refs
+const UI = {
+  hud: document.getElementById('hud'),
+  gold: document.getElementById('gold-display'),
+  best: document.getElementById('best-display'),
+  sails: document.getElementById('sail-display'),
+  hull: document.getElementById('hull-display'),
+  hearts: document.querySelectorAll('#hull-display span'),
+  compass: document.getElementById('compass'),
+  arrow: document.getElementById('compass-arrow'),
+  start: document.getElementById('start-screen'),
+  over: document.getElementById('game-over'),
+  pause: document.getElementById('pause-screen'),
+  finalScore: document.getElementById('final-score'),
+  newBest: document.getElementById('new-best'),
+  overBest: document.getElementById('over-best'),
+  steerL: document.getElementById('steer-left'),
+  steerR: document.getElementById('steer-right'),
+};
+UI.best.textContent = `Best: ${bestScore}`;
+if (isTouch) {
+  document.getElementById('controls-hint').textContent = 'Hold left / right side of the screen to steer';
+  document.getElementById('start-prompt').textContent = 'Tap to Set Sail';
+  document.getElementById('restart-prompt').textContent = 'Tap to Sail Again';
+  document.getElementById('pause-prompt').textContent = 'Tap to Resume';
+}
+
+// ------------------------------------------------------------------ renderer / scene
+const canvas = document.getElementById('sea');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.62;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x9fd9ec, 1200, 5200);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 12000);
+camera.position.set(0, 12, -30);
+
+const sunLight = new THREE.DirectionalLight(0xfff2dd, 2.2);
+sunLight.position.set(120, 160, -80);
+scene.add(sunLight);
+scene.add(new THREE.HemisphereLight(0xbfe6f5, 0x0a3a4a, 0.55));
+
+// ------------------------------------------------------------------ sky + sun + environment
+const sky = new Sky();
+sky.scale.setScalar(10000);
+scene.add(sky);
+const skyU = sky.material.uniforms;
+skyU.turbidity.value = 1.2;   // low turbidity + low rayleigh = crisp tropical blue
+skyU.rayleigh.value = 0.45;
+skyU.mieCoefficient.value = 0.002;
+skyU.mieDirectionalG.value = 0.8;
+
+const sun = new THREE.Vector3();
+
+// ------------------------------------------------------------------ water
+const water = new Water(new THREE.PlaneGeometry(10000, 10000), {
+  textureWidth: 512,
+  textureHeight: 512,
+  // note: the three npm package doesn't ship example textures — use the GitHub mirror, pinned to the same release
+  waterNormals: new THREE.TextureLoader().load(
+    'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/waternormals.jpg',
+    (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; }
+  ),
+  sunDirection: new THREE.Vector3(),
+  sunColor: 0xffffff,
+  waterColor: 0x0aa8c0,
+  distortionScale: prefersReducedMotion ? 1.6 : 4.5,
+  fog: true,
+});
+water.rotation.x = -Math.PI / 2;
+scene.add(water);
+
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+const sceneEnv = new THREE.Scene();
+let envRT;
+function updateSun() {
+  const phi = THREE.MathUtils.degToRad(90 - 32);   // elevation 32° — high tropical sun
+  const theta = THREE.MathUtils.degToRad(145);
+  sun.setFromSphericalCoords(1, phi, theta);
+  skyU.sunPosition.value.copy(sun);
+  water.material.uniforms.sunDirection.value.copy(sun).normalize();
+  sunLight.position.copy(sun).multiplyScalar(300);
+  if (envRT) envRT.dispose();
+  sceneEnv.add(sky);
+  envRT = pmremGenerator.fromScene(sceneEnv);
+  scene.add(sky);
+  scene.environment = envRT.texture;
+}
+updateSun();
+
+// ------------------------------------------------------------------ wave sampling (visual bob — the water shader itself is flat)
+function waveY(x, z, t) {
+  return Math.sin(x * 0.04 + t * 1.1) * 0.55
+       + Math.cos(z * 0.05 + t * 0.8) * 0.45
+       + Math.sin((x + z) * 0.021 + t * 0.6) * 0.35;
+}
+
+// ------------------------------------------------------------------ soft radial sprite texture (glows, splashes, clouds)
+function makeGlowTexture(size = 128) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(c);
+}
+const glowTex = makeGlowTexture();
+
+function makeCloudTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 16; i++) {
+    const x = 40 + Math.random() * 176;
+    const y = 45 + Math.random() * 45;
+    const r = 18 + Math.random() * 30;
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, 'rgba(255,255,255,0.55)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 128);
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+// ------------------------------------------------------------------ clouds
+const clouds = [];
+{
+  const cloudTex = makeCloudTexture();
+  for (let i = 0; i < 14; i++) {
+    const mat = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.55, depthWrite: false, fog: false, toneMapped: false });
+    const s = new THREE.Sprite(mat);
+    const a = Math.random() * Math.PI * 2;
+    const d = 400 + Math.random() * 1400;
+    s.position.set(Math.sin(a) * d, 150 + Math.random() * 200, Math.cos(a) * d);
+    const w = 260 + Math.random() * 340;
+    s.scale.set(w, w * 0.42, 1);
+    scene.add(s);
+    clouds.push({ sprite: s, vx: 1.5 + Math.random() * 2 });
+  }
+}
+
+// ------------------------------------------------------------------ ship
+const shipGroup = new THREE.Group();
+scene.add(shipGroup);
+
+function buildShip() {
+  const wood     = new THREE.MeshStandardMaterial({ color: 0x6f4a2c, roughness: 0.8, metalness: 0.05, flatShading: true });
+  const woodDark = new THREE.MeshStandardMaterial({ color: 0x47301c, roughness: 0.85, flatShading: true });
+  const deckMat  = new THREE.MeshStandardMaterial({ color: 0x9c7a4e, roughness: 0.9, flatShading: true });
+  const sailMat  = new THREE.MeshStandardMaterial({ color: 0xf1e7d0, roughness: 0.95, side: THREE.DoubleSide });
+  const mastMat  = new THREE.MeshStandardMaterial({ color: 0x5a3f26, roughness: 0.85 });
+
+  // hull — tapered box; bow (+z) sharper than the stern, narrower below the waterline
+  const hullGeo = new THREE.BoxGeometry(5, 3.2, 16, 1, 2, 8);
+  const hp = hullGeo.attributes.position;
+  for (let i = 0; i < hp.count; i++) {
+    const x = hp.getX(i), y = hp.getY(i), z = hp.getZ(i);
+    const tz = Math.abs(z) / 8;
+    let sx = 1 - tz * tz * (z > 0 ? 0.8 : 0.45);
+    if (y < 0) sx *= 0.55 + 0.45 * (1 + y / 1.6); // pinch toward the keel
+    hp.setX(i, x * sx);
+    if (z > 6.5) hp.setY(i, y + 1.0);   // bow sweep
+    if (z < -6.5) hp.setY(i, y + 0.7);  // stern sweep
+  }
+  hullGeo.computeVertexNormals();
+  const hullMesh = new THREE.Mesh(hullGeo, wood);
+  hullMesh.position.y = 0.7;
+  shipGroup.add(hullMesh);
+
+  // wale stripe — slightly wider dark band around the top of the hull
+  const waleGeo = new THREE.BoxGeometry(5.2, 0.5, 15.2, 1, 1, 8);
+  const wp = waleGeo.attributes.position;
+  for (let i = 0; i < wp.count; i++) {
+    const x = wp.getX(i), z = wp.getZ(i);
+    const tz = Math.abs(z) / 7.6;
+    wp.setX(i, x * (1 - tz * tz * (z > 0 ? 0.8 : 0.45)));
+  }
+  waleGeo.computeVertexNormals();
+  const wale = new THREE.Mesh(waleGeo, woodDark);
+  wale.position.y = 2.1;
+  shipGroup.add(wale);
+
+  // deck
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.25, 13.5), deckMat);
+  deck.position.y = 2.35;
+  shipGroup.add(deck);
+
+  // stern castle
+  const castle = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.7, 4.2), wood);
+  castle.position.set(0, 3.1, -5.6);
+  shipGroup.add(castle);
+  const castleTop = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.25, 4.4), woodDark);
+  castleTop.position.set(0, 4.05, -5.6);
+  shipGroup.add(castleTop);
+
+  // bowsprit
+  const bowsprit = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.18, 7, 6), mastMat);
+  bowsprit.rotation.x = -Math.PI / 2 + 0.32;
+  bowsprit.position.set(0, 3.1, 9.6);
+  shipGroup.add(bowsprit);
+
+  // masts + yards
+  function mast(z, h) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, h, 7), mastMat);
+    m.position.set(0, 2.3 + h / 2, z);
+    shipGroup.add(m);
+    return m;
+  }
+  mast(2.8, 13.5);
+  mast(-2.4, 11);
+
+  function yard(z, y, w) {
+    const yd = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, w, 6), mastMat);
+    yd.rotation.z = Math.PI / 2;
+    yd.position.set(0, y, z);
+    shipGroup.add(yd);
+  }
+  yard(2.8, 13.2, 7.5); yard(2.8, 9.2, 8.5);
+  yard(-2.4, 11.2, 6.5); yard(-2.4, 7.6, 7.5);
+
+  // sails — billowed planes (bulge toward the bow, wind astern)
+  function makeSail(w, h, billow) {
+    const g = new THREE.PlaneGeometry(w, h, 10, 6);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const u = p.getX(i) / (w / 2);
+      const v = p.getY(i) / (h / 2);
+      p.setZ(i, (1 - u * u) * (1 - 0.35 * v * v) * billow);
+    }
+    g.computeVertexNormals();
+    return g;
+  }
+  function sail(z, y, w, h, billow) {
+    const s = new THREE.Mesh(makeSail(w, h, billow), sailMat);
+    s.position.set(0, y, z);
+    shipGroup.add(s);
+    return s;
+  }
+  sail(2.8, 11.2, 7, 3.6, 1.3);
+  sail(2.8, 7.0, 8, 4.2, 1.6);
+  sail(-2.4, 9.4, 6, 3.2, 1.1);
+  sail(-2.4, 5.9, 7, 3.4, 1.4);
+
+  // jib — triangle between foremast top and bowsprit
+  const jibShape = new THREE.Shape();
+  jibShape.moveTo(0, 0); jibShape.lineTo(0, 7.5); jibShape.lineTo(6.5, 0); jibShape.closePath();
+  const jib = new THREE.Mesh(new THREE.ShapeGeometry(jibShape), sailMat);
+  jib.rotation.y = -Math.PI / 2;
+  jib.position.set(0, 4.6, 5.2);
+  shipGroup.add(jib);
+
+  // black flag on the mainmast
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2), new THREE.MeshBasicMaterial({ color: 0x15151d, side: THREE.DoubleSide }));
+  flag.position.set(1.2, 15.4, 2.8);
+  shipGroup.add(flag);
+
+  // stern lantern
+  const lantern = new THREE.Mesh(
+    new THREE.SphereGeometry(0.32, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffc266, emissive: 0xff9933, emissiveIntensity: 1.6 })
+  );
+  lantern.position.set(0, 4.6, -7.9);
+  shipGroup.add(lantern);
+
+  // rigging lines
+  const rig = [];
+  rig.push(0, 15.8, 2.8,  0, 5.2, 8.9);   // mainmast → bowsprit tip
+  rig.push(0, 15.8, 2.8,  0, 13.4, -2.4); // mainmast → foremast (backstay)
+  rig.push(0, 13.4, -2.4, 0, 4.2, -7.7);  // rear mast → stern
+  rig.push(2.2, 2.5, 2.8, 0, 13.0, 2.8);  // shrouds
+  rig.push(-2.2, 2.5, 2.8, 0, 13.0, 2.8);
+  rig.push(2.0, 2.5, -2.4, 0, 10.8, -2.4);
+  rig.push(-2.0, 2.5, -2.4, 0, 10.8, -2.4);
+  const rigGeo = new THREE.BufferGeometry();
+  rigGeo.setAttribute('position', new THREE.Float32BufferAttribute(rig, 3));
+  shipGroup.add(new THREE.LineSegments(rigGeo, new THREE.LineBasicMaterial({ color: 0x1a1410, transparent: true, opacity: 0.7 })));
+
+  return { hullMesh, flag };
+}
+const shipParts = buildShip();
+
+// ------------------------------------------------------------------ islands
+const islands = []; // { x, z, r } collision circles
+function makeIsland(x, z, r) {
+  const h = r * 0.62;
+  const geo = new THREE.ConeGeometry(r, h, 22, 5).toNonIndexed();
+  const p = geo.attributes.position;
+  const colors = new Float32Array(p.count * 3);
+  const sand = new THREE.Color(0xd9c08a), grass = new THREE.Color(0x3fa25c), rock = new THREE.Color(0x6e7a6a);
+  const seed = Math.random() * 100;
+  const tmp = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const vx = p.getX(i), vy = p.getY(i), vz = p.getZ(i);
+    const ang = Math.atan2(vx, vz);
+    const n = 1 + 0.16 * Math.sin(ang * 3 + seed) + 0.1 * Math.sin(ang * 7 + seed * 2) + 0.06 * Math.sin(vy * 0.8 + seed);
+    p.setX(i, vx * n);
+    p.setZ(i, vz * n);
+    const t = (vy + h / 2) / h; // 0 base → 1 peak
+    if (t < 0.18) tmp.copy(sand);
+    else if (t < 0.75) tmp.copy(grass).lerp(sand, Math.max(0, (0.35 - t) * 2));
+    else tmp.copy(rock).lerp(grass, (1 - t) * 3);
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+  mesh.position.set(x, h / 2 - 2.5, z);
+  scene.add(mesh);
+
+  // palms near the top
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8a6642, roughness: 0.9 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2e8b4f, roughness: 0.9, flatShading: true });
+  const palms = 2 + Math.floor(r / 12);
+  for (let i = 0; i < palms; i++) {
+    const pa = Math.random() * Math.PI * 2;
+    const pd = r * (0.15 + Math.random() * 0.3);
+    const py = h * (1 - pd / r) - 2.5 - 0.5;
+    const palm = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.28, 4.5, 5), trunkMat);
+    trunk.position.y = 2.25;
+    trunk.rotation.z = (Math.random() - 0.5) * 0.35;
+    palm.add(trunk);
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(2.2, 1.1, 6), leafMat);
+    crown.position.set(trunk.rotation.z * -4.5, 4.6, 0);
+    crown.scale.y = 0.8;
+    palm.add(crown);
+    palm.position.set(x + Math.sin(pa) * pd, py, z + Math.cos(pa) * pd);
+    palm.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(palm);
+  }
+  islands.push({ x, z, r: r * 1.08 });
+}
+
+// ------------------------------------------------------------------ rocks
+const rocks = []; // { x, z, r }
+const rockMat = new THREE.MeshStandardMaterial({ color: 0x39424e, roughness: 0.95, flatShading: true });
+const foamMatShared = new THREE.MeshBasicMaterial({ color: 0xdff4f8, transparent: true, opacity: 0.3, depthWrite: false });
+function makeRock(x, z, r) {
+  const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), rockMat);
+  mesh.scale.set(1 + Math.random() * 0.4, 0.8 + Math.random() * 0.7, 1 + Math.random() * 0.4);
+  mesh.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
+  mesh.position.set(x, -r * 0.25, z);
+  scene.add(mesh);
+  const foam = new THREE.Mesh(new THREE.RingGeometry(r * 1.1, r * 1.7, 20), foamMatShared);
+  foam.rotation.x = -Math.PI / 2;
+  foam.position.set(x, 0.15, z);
+  scene.add(foam);
+  rocks.push({ x, z, r: r * 1.15 });
+}
+
+// scatter islands + rocks, keeping the spawn area clear
+function distToHazards(x, z) {
+  let d = Infinity;
+  for (const i of islands) d = Math.min(d, Math.hypot(x - i.x, z - i.z) - i.r);
+  for (const r of rocks) d = Math.min(d, Math.hypot(x - r.x, z - r.z) - r.r);
+  return d;
+}
+for (let i = 0; i < 6; i++) {
+  for (let tries = 0; tries < 30; tries++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = 120 + Math.random() * (MAP_R - 160);
+    const x = Math.sin(a) * d, z = Math.cos(a) * d;
+    const r = 26 + Math.random() * 22;
+    if (distToHazards(x, z) > r + 40) { makeIsland(x, z, r); break; }
+  }
+}
+for (let i = 0; i < 34; i++) {
+  for (let tries = 0; tries < 30; tries++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = 70 + Math.random() * (MAP_R - 90);
+    const x = Math.sin(a) * d, z = Math.cos(a) * d;
+    const r = 1.6 + Math.random() * 3;
+    if (distToHazards(x, z) > r + 14) { makeRock(x, z, r); break; }
+  }
+}
+
+// ------------------------------------------------------------------ treasure chests
+const chests = [];
+const chestBaseMat = new THREE.MeshStandardMaterial({ color: 0x7a4a20, roughness: 0.7, flatShading: true });
+const chestLidMat  = new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 0.7, roughness: 0.35, emissive: 0x553300, emissiveIntensity: 0.5 });
+const beamMat = new THREE.MeshBasicMaterial({ color: 0xffd76a, transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+function makeChest() {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.1, 1.3), chestBaseMat);
+  g.add(base);
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 1.9, 10, 1, false, 0, Math.PI), chestLidMat);
+  lid.rotation.z = Math.PI / 2;
+  lid.position.y = 0.55;
+  g.add(lid);
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(1.7, 11, 10, 1, true), beamMat);
+  beam.position.y = 6;
+  g.add(beam);
+  const glowMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffd766, transparent: true, opacity: 0.65, depthWrite: false, toneMapped: false });
+  const glow = new THREE.Sprite(glowMat);
+  glow.scale.set(7, 7, 1);
+  glow.position.y = 1;
+  g.add(glow);
+  scene.add(g);
+  return g;
+}
+function placeChest(c, avoidShip) {
+  for (let tries = 0; tries < 40; tries++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = 40 + Math.random() * (MAP_R - 70);
+    const x = Math.sin(a) * d, z = Math.cos(a) * d;
+    if (distToHazards(x, z) < 12) continue;
+    if (avoidShip && Math.hypot(x - shipGroup.position.x, z - shipGroup.position.z) < 60) continue;
+    c.position.set(x, 0, z);
+    c.userData.spin = Math.random() * Math.PI * 2;
+    return;
+  }
+  c.position.set(0, 0, 80); // fallback
+}
+for (let i = 0; i < CHEST_COUNT; i++) {
+  const c = makeChest();
+  placeChest(c, false);
+  chests.push(c);
+}
+
+// ------------------------------------------------------------------ wake foam
+const foamPool = [];
+{
+  const foamGeo = new THREE.CircleGeometry(1, 10);
+  for (let i = 0; i < 36; i++) {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xe6f6fa, transparent: true, opacity: 0, depthWrite: false });
+    const m = new THREE.Mesh(foamGeo, mat);
+    m.rotation.x = -Math.PI / 2;
+    m.visible = false;
+    scene.add(m);
+    foamPool.push({ mesh: m, life: 0 });
+  }
+}
+let foamTimer = 0;
+function spawnFoam(x, z) {
+  const f = foamPool.find(f => f.life <= 0);
+  if (!f) return;
+  f.life = 1;
+  f.mesh.visible = true;
+  f.mesh.position.set(x + (Math.random() - 0.5) * 1.5, 0.12, z + (Math.random() - 0.5) * 1.5);
+}
+
+// ------------------------------------------------------------------ spark burst (collect / hit)
+const sparks = [];
+for (let i = 0; i < 50; i++) {
+  const mat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffd766, transparent: true, opacity: 0, depthWrite: false });
+  const s = new THREE.Sprite(mat);
+  s.visible = false;
+  scene.add(s);
+  sparks.push({ sprite: s, life: 0, vx: 0, vy: 0, vz: 0 });
+}
+function burst(pos, color, count, speedScale = 1) {
+  let spawned = 0;
+  for (const p of sparks) {
+    if (spawned >= count) break;
+    if (p.life > 0) continue;
+    p.life = 0.9;
+    p.vx = (Math.random() - 0.5) * 12 * speedScale;
+    p.vy = 4 + Math.random() * 9 * speedScale;
+    p.vz = (Math.random() - 0.5) * 12 * speedScale;
+    p.sprite.position.copy(pos);
+    p.sprite.material.color.setHex(color);
+    p.sprite.material.opacity = 1;
+    p.sprite.scale.setScalar(1.4 + Math.random() * 1.2);
+    p.sprite.visible = true;
+    spawned++;
+  }
+}
+
+// ------------------------------------------------------------------ audio (lazy WebAudio)
+let audioCtx = null;
+function initAudio() {
+  if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // looping wind + sea noise
+    const len = audioCtx.sampleRate * 2;
+    const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass'; filter.frequency.value = 320; filter.Q.value = 0.4;
+    const lfo = audioCtx.createOscillator();
+    lfo.frequency.value = 0.09;
+    const lfoGain = audioCtx.createGain();
+    lfoGain.gain.value = 140;
+    lfo.connect(lfoGain); lfoGain.connect(filter.frequency);
+    const windGain = audioCtx.createGain();
+    windGain.gain.value = 0.045;
+    src.connect(filter); filter.connect(windGain); windGain.connect(audioCtx.destination);
+    src.start(); lfo.start();
+  } catch (e) {}
+}
+function bleep(freq, dur, type = 'triangle', vol = 0.12, delay = 0) {
+  if (!audioCtx || audioCtx.state === 'suspended') return;
+  const t0 = audioCtx.currentTime + delay;
+  const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  gain.gain.setValueAtTime(vol, t0);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t0); osc.stop(t0 + dur);
+}
+function playCollect() { bleep(660, 0.12); bleep(880, 0.12, 'triangle', 0.12, 0.07); bleep(1320, 0.2, 'triangle', 0.1, 0.14); }
+function playHit() {
+  bleep(75, 0.3, 'square', 0.18);
+  bleep(55, 0.4, 'sawtooth', 0.1, 0.05);
+}
+function playSink() {
+  if (!audioCtx || audioCtx.state === 'suspended') return;
+  const t0 = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(220, t0);
+  osc.frequency.exponentialRampToValueAtTime(50, t0 + 1.4);
+  gain.gain.setValueAtTime(0.14, t0);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + 1.5);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t0); osc.stop(t0 + 1.5);
+}
+
+// ------------------------------------------------------------------ UI helpers
+function updateHud() {
+  UI.gold.textContent = `Gold: ${score}`;
+  UI.best.textContent = `Best: ${bestScore}`;
+  UI.sails.textContent = 'SAILS ' + '▮'.repeat(sailLevel) + '▯'.repeat(MAX_SAIL - sailLevel);
+  UI.hearts.forEach((h, i) => h.classList.toggle('lost', i >= hull));
+}
+
+function setState(next) {
+  state = next;
+  UI.start.style.display = next === 'menu' ? 'flex' : 'none';
+  UI.over.style.display = next === 'over' ? 'flex' : 'none';
+  const inGame = next === 'playing' || next === 'sinking';
+  UI.hud.style.display = inGame ? 'flex' : 'none';
+  UI.hull.style.display = inGame ? 'block' : 'none';
+  UI.compass.style.display = next === 'playing' ? 'flex' : 'none';
+  const showSteer = isTouch && next === 'playing';
+  UI.steerL.style.display = showSteer ? 'block' : 'none';
+  UI.steerR.style.display = showSteer ? 'block' : 'none';
+}
+
+function resetGame() {
+  score = 0; hull = 3; sailLevel = 2;
+  runStartBest = bestScore;
+  heading = Math.random() * Math.PI * 2;
+  speed = 0; invuln = 0; shake = 0; sinkTimer = 0;
+  shipGroup.position.set(0, 0, 0);
+  shipGroup.rotation.set(0, heading, 0);
+  shipParts.hullMesh.material.emissive = new THREE.Color(0x000000);
+  shipGroup.visible = true;
+  chests.forEach(c => placeChest(c, true));
+  updateHud();
+  setState('playing');
+}
+
+function endGame() {
+  setState('over');
+  UI.finalScore.textContent = `Gold: ${score}`;
+  UI.newBest.style.display = (score > 0 && score > runStartBest) ? 'block' : 'none';
+  UI.overBest.textContent = `Best: ${bestScore}`;
+  overTimer = 0.8; // brief lockout so a panic tap doesn't instantly restart
+}
+
+function sinkShip() {
+  state = 'sinking';
+  sinkTimer = 2.6;
+  playSink();
+}
+
+// ------------------------------------------------------------------ input
+const keys = {};
+function primaryAction() {
+  initAudio();
+  if (state === 'menu') resetGame();
+  else if (state === 'over' && overTimer <= 0) resetGame();
+  else if (paused) { paused = false; UI.pause.style.display = 'none'; }
+}
+
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  keys[e.code] = true;
+  initAudio();
+  if (e.code === 'Space') { e.preventDefault(); primaryAction(); }
+  if (e.code === 'KeyP' && (state === 'playing')) {
+    paused = !paused;
+    UI.pause.style.display = paused ? 'flex' : 'none';
+  }
+  if (e.code === 'KeyW' || e.code === 'ArrowUp')   { sailLevel = Math.min(MAX_SAIL, sailLevel + 1); updateHud(); }
+  if (e.code === 'KeyS' || e.code === 'ArrowDown') { sailLevel = Math.max(0, sailLevel - 1); updateHud(); }
+});
+window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+// touch — hold left/right half to steer; tap acts as the primary action
+const activeTouches = new Map(); // id → side (-1 | 1)
+function touchSteer() {
+  let s = 0;
+  for (const side of activeTouches.values()) s += side;
+  return Math.max(-1, Math.min(1, s));
+}
+window.addEventListener('touchstart', (e) => {
+  if (e.target.closest('.back-to-gallery')) return;
+  e.preventDefault();
+  initAudio();
+  if (state !== 'playing' || paused) { primaryAction(); return; }
+  for (const t of e.changedTouches) {
+    activeTouches.set(t.identifier, t.clientX < window.innerWidth / 2 ? -1 : 1);
+  }
+}, { passive: false });
+window.addEventListener('touchmove', (e) => {
+  if (e.target.closest('.back-to-gallery')) return;
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (activeTouches.has(t.identifier)) {
+      activeTouches.set(t.identifier, t.clientX < window.innerWidth / 2 ? -1 : 1);
+    }
+  }
+}, { passive: false });
+function touchEnd(e) {
+  for (const t of e.changedTouches) activeTouches.delete(t.identifier);
+}
+window.addEventListener('touchend', touchEnd);
+window.addEventListener('touchcancel', touchEnd);
+
+// mouse click also starts / restarts (desktop convenience)
+window.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'touch') return;
+  if (e.target.closest('.back-to-gallery')) return;
+  initAudio();
+  if (state !== 'playing' || paused) primaryAction();
+});
+
+// pause when the tab is hidden
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state === 'playing' && !paused) {
+    paused = true;
+    UI.pause.style.display = 'flex';
+  }
+});
+
+// ------------------------------------------------------------------ resize
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+// ------------------------------------------------------------------ game update
+const fwd = new THREE.Vector3();
+const camTarget = new THREE.Vector3();
+const camDesired = new THREE.Vector3();
+const tmpVec = new THREE.Vector3();
+
+function updatePlaying(dt) {
+  // steering
+  steerInput = 0;
+  if (keys['KeyA'] || keys['ArrowLeft']) steerInput -= 1;
+  if (keys['KeyD'] || keys['ArrowRight']) steerInput += 1;
+  if (isTouch) steerInput += touchSteer();
+  steerInput = Math.max(-1, Math.min(1, steerInput));
+
+  const targetSpeed = sailLevel * SPEED_PER_SAIL;
+  speed += (targetSpeed - speed) * Math.min(1, dt * 0.8);
+
+  const speedFactor = 0.35 + 0.65 * Math.min(1, Math.abs(speed) / (MAX_SAIL * SPEED_PER_SAIL));
+  heading -= steerInput * TURN_RATE * speedFactor * dt;
+
+  fwd.set(Math.sin(heading), 0, Math.cos(heading));
+  shipGroup.position.x += fwd.x * speed * dt;
+  shipGroup.position.z += fwd.z * speed * dt;
+
+  // world edge — slide along an invisible ring
+  const dist = Math.hypot(shipGroup.position.x, shipGroup.position.z);
+  if (dist > MAP_R) {
+    shipGroup.position.x *= MAP_R / dist;
+    shipGroup.position.z *= MAP_R / dist;
+  }
+
+  // hazard collisions
+  if (invuln > 0) invuln -= dt;
+  const hazards = rocks.concat(islands);
+  for (const h of hazards) {
+    const dx = shipGroup.position.x - h.x;
+    const dz = shipGroup.position.z - h.z;
+    const d = Math.hypot(dx, dz);
+    const minD = h.r + SHIP_R;
+    if (d < minD) {
+      // push out along the normal
+      const push = (minD - d) / (d || 1);
+      shipGroup.position.x += dx * push;
+      shipGroup.position.z += dz * push;
+      speed *= -0.25;
+      if (invuln <= 0) {
+        hull -= 1;
+        invuln = 1.8;
+        shake = prefersReducedMotion ? 0 : 1;
+        playHit();
+        burst(shipGroup.position.clone().setY(2), 0xdff4f8, 10, 0.8);
+        updateHud();
+        if (hull <= 0) { sinkShip(); return; }
+      }
+    }
+  }
+
+  // treasure
+  let nearest = null, nearestD = Infinity;
+  for (const c of chests) {
+    const d = Math.hypot(c.position.x - shipGroup.position.x, c.position.z - shipGroup.position.z);
+    if (d < nearestD) { nearestD = d; nearest = c; }
+    if (d < COLLECT_R) {
+      score += 10;
+      if (score > bestScore) {
+        bestScore = score;
+        try { localStorage.setItem('plunder-run-best', String(bestScore)); } catch (e) {}
+      }
+      playCollect();
+      burst(c.position.clone().setY(1.5), 0xffd766, 14);
+      placeChest(c, true);
+      updateHud();
+    }
+  }
+
+  // compass points at the nearest chest, relative to the ship's heading
+  if (nearest) {
+    const wa = Math.atan2(nearest.position.x - shipGroup.position.x, nearest.position.z - shipGroup.position.z);
+    const rel = wa - heading;
+    UI.arrow.style.transform = `rotate(${(-rel * 180 / Math.PI) - 90}deg)`;
+  }
+
+  // wake foam
+  foamTimer -= dt;
+  if (speed > 4 && foamTimer <= 0) {
+    foamTimer = 0.07;
+    tmpVec.copy(shipGroup.position).addScaledVector(fwd, -8);
+    spawnFoam(tmpVec.x, tmpVec.z);
+  }
+}
+
+// ------------------------------------------------------------------ main loop
+function loop(t) {
+  requestAnimationFrame(loop);
+  const dt = Math.min((t - lastTime) / 1000, 0.1);
+  lastTime = t;
+  if (paused) return;
+
+  waterTime += dt;
+  water.material.uniforms.time.value = waterTime * (prefersReducedMotion ? 0.4 : 0.8);
+
+  if (state === 'playing') updatePlaying(dt);
+
+  if (state === 'sinking') {
+    sinkTimer -= dt;
+    shipGroup.position.y -= dt * 1.6;
+    shipGroup.rotation.z += dt * 0.35;
+    shipGroup.rotation.x += dt * 0.12;
+    speed *= 0.95;
+    shipGroup.position.x += fwd.x * speed * dt;
+    shipGroup.position.z += fwd.z * speed * dt;
+    if (sinkTimer <= 0) endGame();
+  }
+  if (state === 'over' && overTimer > 0) overTimer -= dt;
+
+  // ship bob + rock (skip while sinking — it has its own motion)
+  const px = shipGroup.position.x, pz = shipGroup.position.z;
+  const bobScale = prefersReducedMotion ? 0.4 : 1;
+  if (state !== 'sinking') {
+    fwd.set(Math.sin(heading), 0, Math.cos(heading));
+    shipGroup.position.y = waveY(px, pz, waterTime) * bobScale * 0.8 + 0.15;
+    const ahead = waveY(px + fwd.x * 5, pz + fwd.z * 5, waterTime);
+    const behind = waveY(px - fwd.x * 5, pz - fwd.z * 5, waterTime);
+    const left = waveY(px + fwd.z * 3, pz - fwd.x * 3, waterTime);
+    const right = waveY(px - fwd.z * 3, pz + fwd.x * 3, waterTime);
+    const pitch = Math.atan2(ahead - behind, 10) * bobScale;
+    const roll = Math.atan2(left - right, 6) * bobScale;
+    const heel = steerInput * Math.min(1, speed / 15) * 0.09;
+    shipGroup.rotation.set(pitch, heading, roll + heel);
+  }
+
+  // invulnerability blink
+  shipGroup.visible = !(state === 'playing' && invuln > 0 && Math.floor(t / 90) % 2 === 0);
+
+  // chests bob
+  for (const c of chests) {
+    c.userData.spin += dt * 0.8;
+    c.position.y = waveY(c.position.x, c.position.z, waterTime) * 0.7 + 0.5;
+    c.rotation.y = c.userData.spin;
+    c.children[2].material.opacity = 0.1 + 0.06 * Math.sin(waterTime * 2 + c.userData.spin); // beam pulse
+  }
+
+  // foam decay
+  for (const f of foamPool) {
+    if (f.life > 0) {
+      f.life -= dt * 0.9;
+      const g = 1 - f.life;
+      f.mesh.scale.setScalar(1.5 + g * 5);
+      f.mesh.material.opacity = Math.max(0, f.life) * 0.4;
+      if (f.life <= 0) f.mesh.visible = false;
+    }
+  }
+
+  // sparks
+  for (const p of sparks) {
+    if (p.life > 0) {
+      p.life -= dt;
+      p.vy -= 22 * dt;
+      p.sprite.position.x += p.vx * dt;
+      p.sprite.position.y += p.vy * dt;
+      p.sprite.position.z += p.vz * dt;
+      p.sprite.material.opacity = Math.max(0, p.life);
+      if (p.life <= 0) p.sprite.visible = false;
+    }
+  }
+
+  // clouds drift
+  if (!prefersReducedMotion) {
+    for (const c of clouds) {
+      c.sprite.position.x += c.vx * dt;
+      if (c.sprite.position.x > 2000) c.sprite.position.x = -2000;
+    }
+  }
+
+  // flag flutter
+  shipParts.flag.rotation.y = Math.sin(waterTime * 6) * 0.25;
+
+  // camera
+  if (state === 'menu') {
+    const a = waterTime * 0.1;
+    camDesired.set(Math.sin(a) * 58, 17 + Math.sin(waterTime * 0.4) * 2, Math.cos(a) * 58);
+    camTarget.copy(shipGroup.position).add(tmpVec.set(0, 6, 0));
+  } else {
+    fwd.set(Math.sin(heading), 0, Math.cos(heading));
+    camDesired.copy(shipGroup.position).addScaledVector(fwd, -25).add(tmpVec.set(0, 14.5, 0));
+    camTarget.copy(shipGroup.position).addScaledVector(fwd, 11).add(tmpVec.set(0, 1.5, 0));
+  }
+  const lerpK = 1 - Math.pow(0.0015, dt);
+  camera.position.lerp(camDesired, state === 'menu' ? Math.min(1, dt * 2) : lerpK);
+  if (shake > 0) {
+    shake -= dt * 2.2;
+    camera.position.x += (Math.random() - 0.5) * shake * 1.6;
+    camera.position.y += (Math.random() - 0.5) * shake * 1.2;
+  }
+  camera.lookAt(camTarget);
+
+  renderer.render(scene, camera);
+}
+
+setState('menu');
+updateHud();
+requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>

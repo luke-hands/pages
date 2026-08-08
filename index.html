@@ -397,7 +397,7 @@
 <!-- Player Profile / Stats Dashboard -->
 <div class="stats-dashboard" id="stats-dashboard">
   <div class="stats-card">
-    <div class="stats-val" id="stats-played">0 / 12</div>
+    <div class="stats-val" id="stats-played">0 / 13</div>
     <div class="stats-lbl">Games Played</div>
   </div>
   <div class="stats-card">
@@ -523,6 +523,18 @@
     </div>
   </a>
 
+  <a href="./plunder-run/" class="card" data-tags="action zen" data-game-id="plunder-run">
+    <h2>Plunder Run</h2>
+    <p>Sail a pirate galleon across sunlit seas, hauling in treasure while dodging reefs and rocks.</p>
+    <div class="card-footer">
+      <div class="card-tags">
+        <span class="card-tag">Action</span>
+        <span class="card-tag">Zen</span>
+      </div>
+      <div class="score-badge-container"></div>
+    </div>
+  </a>
+
   <a href="./pulsar/" class="card" data-tags="rhythm action survival" data-game-id="pulsar">
     <h2>Pulsar</h2>
     <p>A rhythmic orbital survival game where you dive and reverse through bullet patterns to the beat.</p>
@@ -589,6 +601,7 @@
     'last-parry': { key: 'last-parry-best' },
     'loop-serpent': { key: 'loop-serpent-best' },
     'neon-scrawl': { key: 'neonScrawlBest' },
+    'plunder-run': { key: 'plunder-run-best' },
     'pulsar': { key: 'pulsar-best' },
     'singularity-command': { key: 'singularity_best' },
     'skyburst': { key: 'skyburst-best' },
@@ -655,7 +668,7 @@
     }
 
     // Update Dashboard UI
-    document.getElementById('stats-played').textContent = `${playedCount} / 12`;
+    document.getElementById('stats-played').textContent = `${playedCount} / 13`;
     document.getElementById('stats-total-score').textContent = totalScorePoints.toLocaleString();
     document.getElementById('stats-rank').textContent = rank;
   }

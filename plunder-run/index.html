@@ -92,8 +92,8 @@
     left: 50%;
     transform: translateX(-50%);
     z-index: 10;
-    width: 54px;
-    height: 54px;
+    width: 64px;
+    height: 64px;
     border-radius: 50%;
     background: rgba(7, 8, 15, 0.45);
     backdrop-filter: blur(12px);
@@ -101,16 +101,90 @@
     border: 1px solid rgba(232, 234, 242, 0.18);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     display: none;
-    align-items: center;
-    justify-content: center;
     pointer-events: none;
   }
-  #compass-arrow {
-    font-size: 22px;
-    color: var(--gold);
-    text-shadow: 0 0 10px rgba(255, 215, 102, 0.7);
+  .dial-arrow {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transition: transform 0.1s linear;
     line-height: 1;
+  }
+  #compass-arrow {
+    font-size: 20px;
+    color: var(--gold);
+    text-shadow: 0 0 10px rgba(255, 215, 102, 0.7);
+  }
+  #wind-arrow {
+    font-size: 12px;
+    color: var(--accent-2);
+    text-shadow: 0 0 8px rgba(70, 200, 255, 0.8);
+  }
+  #ghost-arrow {
+    font-size: 12px;
+    color: #66ffb2;
+    text-shadow: 0 0 8px rgba(102, 255, 178, 0.8);
+    display: none;
+  }
+
+  /* ---- Ghost warning ---- */
+  #ghost-warning {
+    position: fixed;
+    top: 120px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 15;
+    padding: 10px 24px;
+    border-radius: 999px;
+    background: rgba(7, 8, 15, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(102, 255, 178, 0.5);
+    color: #66ffb2;
+    font-weight: 800;
+    font-size: 0.9rem;
+    letter-spacing: 2px;
+    text-shadow: 0 0 12px rgba(102, 255, 178, 0.8);
+    box-shadow: 0 0 24px rgba(102, 255, 178, 0.15);
+    display: none;
+    pointer-events: none;
+    animation: warning-pulse 0.8s ease-in-out infinite;
+  }
+  @keyframes warning-pulse {
+    0%, 100% { opacity: 0.75; }
+    50%      { opacity: 1; }
+  }
+
+  /* ---- Difficulty select ---- */
+  .diff-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .diff-btn {
+    padding: 10px 20px;
+    border-radius: 999px;
+    background: rgba(232, 234, 242, 0.05);
+    border: 1px solid rgba(232, 234, 242, 0.15);
+    color: var(--muted);
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .diff-btn:hover {
+    color: var(--fg);
+    border-color: rgba(232, 234, 242, 0.35);
+  }
+  .diff-btn.active {
+    color: var(--fg);
+    border-color: var(--accent-1);
+    background: rgba(124, 108, 255, 0.15);
+    box-shadow: 0 0 15px rgba(124, 108, 255, 0.25);
   }
 
   /* ---- Overlays ---- */
@@ -259,17 +333,28 @@
   <div class="hud-panel" id="gold-display">Gold: 0</div>
   <div class="hud-panel" id="best-display">Best: 0</div>
   <div class="hud-panel" id="sail-display">SAILS ▮▮▯</div>
+  <div class="hud-panel" id="diff-display">MEDIUM</div>
 </div>
 <div id="hull-display"><span>♥</span><span>♥</span><span>♥</span></div>
-<div id="compass"><div id="compass-arrow">➤</div></div>
+<div id="compass">
+  <div class="dial-arrow" id="compass-arrow">➤</div>
+  <div class="dial-arrow" id="wind-arrow">➤</div>
+  <div class="dial-arrow" id="ghost-arrow">➤</div>
+</div>
+<div id="ghost-warning">☠ THE REVENANT HUNTS YOU ☠</div>
 
 <div id="steer-left" class="steer-hint">‹</div>
 <div id="steer-right" class="steer-hint">›</div>
 
 <div id="start-screen" class="overlay">
   <h1>PLUNDER RUN</h1>
-  <p>Sail the sunlit seas and haul in as much treasure as your hold can bear. Mind the rocks — three strikes and she goes down.</p>
-  <p class="controls-hint" id="controls-hint">A / D or ← → to steer &nbsp;•&nbsp; W / S to trim sails &nbsp;•&nbsp; P to pause</p>
+  <p>Sail the sunlit seas and haul in as much treasure as your hold can bear. Run with the wind for speed — and fill your hold quickly, because the Revenant will come hunting.</p>
+  <p class="controls-hint" id="controls-hint">A / D or ← → to steer &nbsp;•&nbsp; W / S to trim sails &nbsp;•&nbsp; cyan arrow shows the wind &nbsp;•&nbsp; P to pause</p>
+  <div class="diff-row">
+    <button class="diff-btn" data-diff="easy">Easy</button>
+    <button class="diff-btn active" data-diff="medium">Medium</button>
+    <button class="diff-btn" data-diff="hard">Hard</button>
+  </div>
   <div class="prompt" id="start-prompt">Press Space to Set Sail</div>
 </div>
 
@@ -279,6 +364,7 @@
   <div class="new-best" id="new-best" style="display:none">☠ NEW BEST HAUL ☠</div>
   <p class="controls-hint" id="over-best">Best: 0</p>
   <div class="prompt" id="restart-prompt">Press Space to Sail Again</div>
+  <button class="diff-btn" id="menu-return">Change Difficulty</button>
 </div>
 
 <div id="pause-screen" class="overlay">
@@ -294,19 +380,33 @@ import { Sky } from 'three/addons/objects/Sky.js';
 // ------------------------------------------------------------------ constants
 const MAP_R = 450;             // playable ocean radius
 const MAX_SAIL = 3;            // sail trim levels
-const SPEED_PER_SAIL = 7.5;    // units/s per sail level
-const TURN_RATE = 0.85;        // rad/s at full speed
+const SPEED_PER_SAIL = 7.5;    // units/s per sail level at neutral wind
+const TURN_RATE = 0.85;        // base rad/s — slow ships turn tighter, fast ships wider
 const SHIP_R = 3.2;            // ship collision radius
 const CHEST_COUNT = 10;
 const COLLECT_R = 7;
 
+// ghostGold: hold size that summons the Revenant. Its speed brackets the player's
+// crosswind pace (sail 3 ≈ 17 u/s crosswind, 27 downwind), so escape means sailing smart.
+const DIFFICULTY_SETTINGS = {
+  easy:   { rocks: 22, hearts: 4, ghostGold: 90, ghostSpeed: 13,   ghostTurn: 0.55 },
+  medium: { rocks: 34, hearts: 3, ghostGold: 60, ghostSpeed: 16.5, ghostTurn: 0.75 },
+  hard:   { rocks: 46, hearts: 3, ghostGold: 40, ghostSpeed: 19.5, ghostTurn: 0.95 },
+};
+const ROCK_MAX = DIFFICULTY_SETTINGS.hard.rocks;
+const DIFF_COLORS = { easy: 'var(--accent-2)', medium: 'var(--gold)', hard: 'var(--accent-3)' };
+
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+const isSmallScreen = Math.min(window.innerWidth, window.innerHeight) < 700;
+const MAX_DPR = isSmallScreen ? 1.5 : 2;   // phones skip the retina cost of the mirror pass
 
 // ------------------------------------------------------------------ state
 let state = 'menu';            // menu | playing | sinking | over
 let paused = false;
-let score = 0, bestScore = 0;
+let score = 0;
+let currentDifficulty = 'medium';
+let bestScores = { easy: 0, medium: 0, hard: 0 };
 let hull = 3;
 let sailLevel = 2;
 let heading = 0, speed = 0;
@@ -315,10 +415,33 @@ let runStartBest = 0;          // best score before this run — for the "new be
 let steerInput = 0;            // -1 .. 1
 let waterTime = Math.random() * 100;
 let lastTime = 0;
+let activeRockCount = DIFFICULTY_SETTINGS.medium.rocks;
+
+// wind — a direction the weather drifts toward; sailing with it is fast, against it a crawl
+let windDir = Math.random() * Math.PI * 2;
+let windTarget = windDir;
+let windTimer = 10;
+let windFactor = 1, windFactorSmooth = 1;
+
+// the Revenant — a ghost ship that hunts once your hold is heavy enough
+let ghostActive = false;
+let ghostHeading = 0;
+let ghostCooldown = 0;         // after a ram it sheers off for a few seconds
+let warnTimer = 0;
 
 try {
-  const saved = localStorage.getItem('plunder-run-best');
-  if (saved) bestScore = parseInt(saved, 10) || 0;
+  for (const d of ['easy', 'medium', 'hard']) {
+    const v = localStorage.getItem(`plunder-run-best-${d}`);
+    if (v) bestScores[d] = parseInt(v, 10) || 0;
+  }
+  // migrate the original single-best key (pre-difficulty scores were medium-equivalent)
+  const legacy = localStorage.getItem('plunder-run-best');
+  if (legacy && !localStorage.getItem('plunder-run-best-medium')) {
+    bestScores.medium = parseInt(legacy, 10) || 0;
+    localStorage.setItem('plunder-run-best-medium', legacy);
+  }
+  const savedDiff = localStorage.getItem('plunder-run-difficulty');
+  if (savedDiff && DIFFICULTY_SETTINGS[savedDiff]) currentDifficulty = savedDiff;
 } catch (e) {}
 
 // ------------------------------------------------------------------ UI refs
@@ -331,6 +454,10 @@ const UI = {
   hearts: document.querySelectorAll('#hull-display span'),
   compass: document.getElementById('compass'),
   arrow: document.getElementById('compass-arrow'),
+  windArrow: document.getElementById('wind-arrow'),
+  ghostArrow: document.getElementById('ghost-arrow'),
+  diff: document.getElementById('diff-display'),
+  warning: document.getElementById('ghost-warning'),
   start: document.getElementById('start-screen'),
   over: document.getElementById('game-over'),
   pause: document.getElementById('pause-screen'),
@@ -340,9 +467,8 @@ const UI = {
   steerL: document.getElementById('steer-left'),
   steerR: document.getElementById('steer-right'),
 };
-UI.best.textContent = `Best: ${bestScore}`;
 if (isTouch) {
-  document.getElementById('controls-hint').textContent = 'Hold left / right side of the screen to steer';
+  document.getElementById('controls-hint').textContent = 'Hold left / right side of the screen to steer • cyan arrow shows the wind';
   document.getElementById('start-prompt').textContent = 'Tap to Set Sail';
   document.getElementById('restart-prompt').textContent = 'Tap to Sail Again';
   document.getElementById('pause-prompt').textContent = 'Tap to Resume';
@@ -351,7 +477,7 @@ if (isTouch) {
 // ------------------------------------------------------------------ renderer / scene
 const canvas = document.getElementById('sea');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.62;
@@ -381,8 +507,8 @@ const sun = new THREE.Vector3();
 
 // ------------------------------------------------------------------ water
 const water = new Water(new THREE.PlaneGeometry(10000, 10000), {
-  textureWidth: 512,
-  textureHeight: 512,
+  textureWidth: isSmallScreen ? 256 : 512,
+  textureHeight: isSmallScreen ? 256 : 512,
   // note: the three npm package doesn't ship example textures — use the GitHub mirror, pinned to the same release
   waterNormals: new THREE.TextureLoader().load(
     'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/waternormals.jpg',
@@ -475,12 +601,18 @@ const clouds = [];
 const shipGroup = new THREE.Group();
 scene.add(shipGroup);
 
-function buildShip() {
-  const wood     = new THREE.MeshStandardMaterial({ color: 0x6f4a2c, roughness: 0.8, metalness: 0.05, flatShading: true });
-  const woodDark = new THREE.MeshStandardMaterial({ color: 0x47301c, roughness: 0.85, flatShading: true });
-  const deckMat  = new THREE.MeshStandardMaterial({ color: 0x9c7a4e, roughness: 0.9, flatShading: true });
-  const sailMat  = new THREE.MeshStandardMaterial({ color: 0xf1e7d0, roughness: 0.95, side: THREE.DoubleSide });
-  const mastMat  = new THREE.MeshStandardMaterial({ color: 0x5a3f26, roughness: 0.85 });
+function buildShip(G, opts = {}) {
+  const P = Object.assign({
+    hull: 0x6f4a2c, hullDark: 0x47301c, deck: 0x9c7a4e, sail: 0xf1e7d0, mast: 0x5a3f26,
+    flagColor: 0x15151d, lantern: 0xffc266, lanternEmissive: 0xff9933, opacity: 1,
+  }, opts);
+  const ghostly = P.opacity < 1 ? { transparent: true, opacity: P.opacity } : {};
+  const wood     = new THREE.MeshStandardMaterial({ color: P.hull, roughness: 0.8, metalness: 0.05, flatShading: true, ...ghostly });
+  const woodDark = new THREE.MeshStandardMaterial({ color: P.hullDark, roughness: 0.85, flatShading: true, ...ghostly });
+  const deckMat  = new THREE.MeshStandardMaterial({ color: P.deck, roughness: 0.9, flatShading: true, ...ghostly });
+  const sailMat  = new THREE.MeshStandardMaterial({ color: P.sail, roughness: 0.95, side: THREE.DoubleSide, ...ghostly });
+  const mastMat  = new THREE.MeshStandardMaterial({ color: P.mast, roughness: 0.85, ...ghostly });
+  const sails = [];
 
   // hull — tapered box; bow (+z) sharper than the stern, narrower below the waterline
   const hullGeo = new THREE.BoxGeometry(5, 3.2, 16, 1, 2, 8);
@@ -497,7 +629,7 @@ function buildShip() {
   hullGeo.computeVertexNormals();
   const hullMesh = new THREE.Mesh(hullGeo, wood);
   hullMesh.position.y = 0.7;
-  shipGroup.add(hullMesh);
+  G.add(hullMesh);
 
   // wale stripe — slightly wider dark band around the top of the hull
   const waleGeo = new THREE.BoxGeometry(5.2, 0.5, 15.2, 1, 1, 8);
@@ -510,32 +642,32 @@ function buildShip() {
   waleGeo.computeVertexNormals();
   const wale = new THREE.Mesh(waleGeo, woodDark);
   wale.position.y = 2.1;
-  shipGroup.add(wale);
+  G.add(wale);
 
   // deck
   const deck = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.25, 13.5), deckMat);
   deck.position.y = 2.35;
-  shipGroup.add(deck);
+  G.add(deck);
 
   // stern castle
   const castle = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.7, 4.2), wood);
   castle.position.set(0, 3.1, -5.6);
-  shipGroup.add(castle);
+  G.add(castle);
   const castleTop = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.25, 4.4), woodDark);
   castleTop.position.set(0, 4.05, -5.6);
-  shipGroup.add(castleTop);
+  G.add(castleTop);
 
   // bowsprit
   const bowsprit = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.18, 7, 6), mastMat);
   bowsprit.rotation.x = -Math.PI / 2 + 0.32;
   bowsprit.position.set(0, 3.1, 9.6);
-  shipGroup.add(bowsprit);
+  G.add(bowsprit);
 
   // masts + yards
   function mast(z, h) {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, h, 7), mastMat);
     m.position.set(0, 2.3 + h / 2, z);
-    shipGroup.add(m);
+    G.add(m);
     return m;
   }
   mast(2.8, 13.5);
@@ -545,7 +677,7 @@ function buildShip() {
     const yd = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, w, 6), mastMat);
     yd.rotation.z = Math.PI / 2;
     yd.position.set(0, y, z);
-    shipGroup.add(yd);
+    G.add(yd);
   }
   yard(2.8, 13.2, 7.5); yard(2.8, 9.2, 8.5);
   yard(-2.4, 11.2, 6.5); yard(-2.4, 7.6, 7.5);
@@ -565,7 +697,8 @@ function buildShip() {
   function sail(z, y, w, h, billow) {
     const s = new THREE.Mesh(makeSail(w, h, billow), sailMat);
     s.position.set(0, y, z);
-    shipGroup.add(s);
+    G.add(s);
+    sails.push(s);
     return s;
   }
   sail(2.8, 11.2, 7, 3.6, 1.3);
@@ -579,20 +712,20 @@ function buildShip() {
   const jib = new THREE.Mesh(new THREE.ShapeGeometry(jibShape), sailMat);
   jib.rotation.y = -Math.PI / 2;
   jib.position.set(0, 4.6, 5.2);
-  shipGroup.add(jib);
+  G.add(jib);
 
   // black flag on the mainmast
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2), new THREE.MeshBasicMaterial({ color: 0x15151d, side: THREE.DoubleSide }));
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2), new THREE.MeshBasicMaterial({ color: P.flagColor, side: THREE.DoubleSide, ...ghostly }));
   flag.position.set(1.2, 15.4, 2.8);
-  shipGroup.add(flag);
+  G.add(flag);
 
   // stern lantern
   const lantern = new THREE.Mesh(
     new THREE.SphereGeometry(0.32, 8, 8),
-    new THREE.MeshStandardMaterial({ color: 0xffc266, emissive: 0xff9933, emissiveIntensity: 1.6 })
+    new THREE.MeshStandardMaterial({ color: P.lantern, emissive: P.lanternEmissive, emissiveIntensity: 1.6 })
   );
   lantern.position.set(0, 4.6, -7.9);
-  shipGroup.add(lantern);
+  G.add(lantern);
 
   // rigging lines
   const rig = [];
@@ -605,11 +738,27 @@ function buildShip() {
   rig.push(-2.0, 2.5, -2.4, 0, 10.8, -2.4);
   const rigGeo = new THREE.BufferGeometry();
   rigGeo.setAttribute('position', new THREE.Float32BufferAttribute(rig, 3));
-  shipGroup.add(new THREE.LineSegments(rigGeo, new THREE.LineBasicMaterial({ color: 0x1a1410, transparent: true, opacity: 0.7 })));
+  G.add(new THREE.LineSegments(rigGeo, new THREE.LineBasicMaterial({ color: 0x1a1410, transparent: true, opacity: 0.7 })));
 
-  return { hullMesh, flag };
+  return { hullMesh, flag, sails };
 }
-const shipParts = buildShip();
+const shipParts = buildShip(shipGroup);
+
+// ------------------------------------------------------------------ the Revenant (ghost ship)
+const ghostGroup = new THREE.Group();
+scene.add(ghostGroup);
+buildShip(ghostGroup, {
+  hull: 0x232d3a, hullDark: 0x161d27, deck: 0x2c3a44, sail: 0x9fc4b0, mast: 0x1f2a30,
+  flagColor: 0x0c1210, lantern: 0x66ffb2, lanternEmissive: 0x2bff9e, opacity: 0.85,
+});
+{
+  const auraMat = new THREE.SpriteMaterial({ map: glowTex, color: 0x49ffae, transparent: true, opacity: 0.3, depthWrite: false, toneMapped: false });
+  const aura = new THREE.Sprite(auraMat);
+  aura.scale.set(28, 14, 1);
+  aura.position.y = 4;
+  ghostGroup.add(aura);
+}
+ghostGroup.visible = false;
 
 // ------------------------------------------------------------------ islands
 const islands = []; // { x, z, r } collision circles
@@ -664,7 +813,8 @@ function makeIsland(x, z, r) {
 }
 
 // ------------------------------------------------------------------ rocks
-const rocks = []; // { x, z, r }
+// the full pool is generated once (sized for hard); difficulty toggles how many are live
+const rockPool = []; // { x, z, r, mesh, foam }
 const rockMat = new THREE.MeshStandardMaterial({ color: 0x39424e, roughness: 0.95, flatShading: true });
 const foamMatShared = new THREE.MeshBasicMaterial({ color: 0xdff4f8, transparent: true, opacity: 0.3, depthWrite: false });
 function makeRock(x, z, r) {
@@ -677,14 +827,17 @@ function makeRock(x, z, r) {
   foam.rotation.x = -Math.PI / 2;
   foam.position.set(x, 0.15, z);
   scene.add(foam);
-  rocks.push({ x, z, r: r * 1.15 });
+  rockPool.push({ x, z, r: r * 1.15, mesh, foam });
 }
 
 // scatter islands + rocks, keeping the spawn area clear
-function distToHazards(x, z) {
+function distToHazards(x, z, rockCount = activeRockCount) {
   let d = Infinity;
   for (const i of islands) d = Math.min(d, Math.hypot(x - i.x, z - i.z) - i.r);
-  for (const r of rocks) d = Math.min(d, Math.hypot(x - r.x, z - r.z) - r.r);
+  for (let k = 0; k < rockCount && k < rockPool.length; k++) {
+    const r = rockPool[k];
+    d = Math.min(d, Math.hypot(x - r.x, z - r.z) - r.r);
+  }
   return d;
 }
 for (let i = 0; i < 6; i++) {
@@ -696,15 +849,16 @@ for (let i = 0; i < 6; i++) {
     if (distToHazards(x, z) > r + 40) { makeIsland(x, z, r); break; }
   }
 }
-for (let i = 0; i < 34; i++) {
+for (let i = 0; i < ROCK_MAX; i++) {
   for (let tries = 0; tries < 30; tries++) {
     const a = Math.random() * Math.PI * 2;
     const d = 70 + Math.random() * (MAP_R - 90);
     const x = Math.sin(a) * d, z = Math.cos(a) * d;
     const r = 1.6 + Math.random() * 3;
-    if (distToHazards(x, z) > r + 14) { makeRock(x, z, r); break; }
+    if (distToHazards(x, z, rockPool.length) > r + 14) { makeRock(x, z, r); break; }
   }
 }
+applyDifficulty(); // set active rock count (and HUD badge) before chests are placed
 
 // ------------------------------------------------------------------ treasure chests
 const chests = [];
@@ -719,9 +873,11 @@ function makeChest() {
   lid.rotation.z = Math.PI / 2;
   lid.position.y = 0.55;
   g.add(lid);
-  const beam = new THREE.Mesh(new THREE.ConeGeometry(1.7, 11, 10, 1, true), beamMat);
+  // each beam gets its own material — a shared one would make every beam pulse in lockstep
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(1.7, 11, 10, 1, true), beamMat.clone());
   beam.position.y = 6;
   g.add(beam);
+  g.userData.beam = beam;
   const glowMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffd766, transparent: true, opacity: 0.65, depthWrite: false, toneMapped: false });
   const glow = new THREE.Sprite(glowMat);
   glow.scale.set(7, 7, 1);
@@ -852,13 +1008,59 @@ function playSink() {
   osc.connect(gain); gain.connect(audioCtx.destination);
   osc.start(t0); osc.stop(t0 + 1.5);
 }
+function playHorn() {
+  if (!audioCtx || audioCtx.state === 'suspended') return;
+  const t0 = audioCtx.currentTime;
+  [65, 82, 98].forEach((f, i) => {
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(f, t0);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.linearRampToValueAtTime(0.07, t0 + 0.15 + i * 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 1.6);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(t0); osc.stop(t0 + 1.7);
+  });
+}
 
 // ------------------------------------------------------------------ UI helpers
 function updateHud() {
   UI.gold.textContent = `Gold: ${score}`;
-  UI.best.textContent = `Best: ${bestScore}`;
+  UI.best.textContent = `Best: ${bestScores[currentDifficulty]}`;
   UI.sails.textContent = 'SAILS ' + '▮'.repeat(sailLevel) + '▯'.repeat(MAX_SAIL - sailLevel);
   UI.hearts.forEach((h, i) => h.classList.toggle('lost', i >= hull));
+}
+
+function applyDifficulty() {
+  activeRockCount = DIFFICULTY_SETTINGS[currentDifficulty].rocks;
+  rockPool.forEach((r, i) => { r.mesh.visible = r.foam.visible = i < activeRockCount; });
+  UI.diff.textContent = currentDifficulty.toUpperCase();
+  UI.diff.style.color = DIFF_COLORS[currentDifficulty];
+}
+function selectDifficulty(d) {
+  if (!DIFFICULTY_SETTINGS[d] || d === currentDifficulty) return;
+  currentDifficulty = d;
+  try { localStorage.setItem('plunder-run-difficulty', d); } catch (e) {}
+  document.querySelectorAll('.diff-btn').forEach(b => b.classList.toggle('active', b.dataset.diff === d));
+  applyDifficulty();
+  updateHud();
+}
+
+function spawnGhost() {
+  ghostActive = true;
+  ghostCooldown = 0;
+  const a = Math.random() * Math.PI * 2;
+  let gx = shipGroup.position.x + Math.sin(a) * 260;
+  let gz = shipGroup.position.z + Math.cos(a) * 260;
+  const d = Math.hypot(gx, gz);
+  if (d > MAP_R) { gx *= MAP_R / d; gz *= MAP_R / d; }
+  ghostGroup.position.set(gx, 0, gz);
+  ghostHeading = Math.atan2(shipGroup.position.x - gx, shipGroup.position.z - gz);
+  ghostGroup.visible = true;
+  UI.ghostArrow.style.display = 'flex';
+  warnTimer = 3;
+  UI.warning.style.display = 'block';
+  playHorn();
 }
 
 function setState(next) {
@@ -875,10 +1077,23 @@ function setState(next) {
 }
 
 function resetGame() {
-  score = 0; hull = 3; sailLevel = 2;
-  runStartBest = bestScore;
+  const diff = DIFFICULTY_SETTINGS[currentDifficulty];
+  score = 0; sailLevel = 2;
+  hull = diff.hearts;
+  UI.hull.innerHTML = '<span>♥</span>'.repeat(diff.hearts);
+  UI.hearts = UI.hull.querySelectorAll('span');
+  runStartBest = bestScores[currentDifficulty];
   heading = Math.random() * Math.PI * 2;
   speed = 0; invuln = 0; shake = 0; sinkTimer = 0;
+  windDir = Math.random() * Math.PI * 2;
+  windTarget = windDir;
+  windTimer = 8 + Math.random() * 8;
+  windFactor = windFactorSmooth = 1;
+  ghostActive = false;
+  ghostGroup.visible = false;
+  UI.ghostArrow.style.display = 'none';
+  UI.warning.style.display = 'none';
+  warnTimer = 0;
   shipGroup.position.set(0, 0, 0);
   shipGroup.rotation.set(0, heading, 0);
   shipParts.hullMesh.material.emissive = new THREE.Color(0x000000);
@@ -892,7 +1107,7 @@ function endGame() {
   setState('over');
   UI.finalScore.textContent = `Gold: ${score}`;
   UI.newBest.style.display = (score > 0 && score > runStartBest) ? 'block' : 'none';
-  UI.overBest.textContent = `Best: ${bestScore}`;
+  UI.overBest.textContent = `Best: ${bestScores[currentDifficulty]}`;
   overTimer = 0.8; // brief lockout so a panic tap doesn't instantly restart
 }
 
@@ -933,7 +1148,7 @@ function touchSteer() {
   return Math.max(-1, Math.min(1, s));
 }
 window.addEventListener('touchstart', (e) => {
-  if (e.target.closest('.back-to-gallery')) return;
+  if (e.target.closest('.back-to-gallery') || e.target.closest('.diff-btn')) return;
   e.preventDefault();
   initAudio();
   if (state !== 'playing' || paused) { primaryAction(); return; }
@@ -959,10 +1174,26 @@ window.addEventListener('touchcancel', touchEnd);
 // mouse click also starts / restarts (desktop convenience)
 window.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch') return;
-  if (e.target.closest('.back-to-gallery')) return;
+  if (e.target.closest('.back-to-gallery') || e.target.closest('.diff-btn')) return;
   initAudio();
   if (state !== 'playing' || paused) primaryAction();
 });
+
+// difficulty pills
+document.querySelectorAll('.diff-btn[data-diff]').forEach(btn => {
+  const pick = (e) => { e.preventDefault(); initAudio(); selectDifficulty(btn.dataset.diff); };
+  btn.addEventListener('click', pick);
+  btn.addEventListener('touchstart', pick, { passive: false });
+});
+document.querySelectorAll('.diff-btn[data-diff]').forEach(b => b.classList.toggle('active', b.dataset.diff === currentDifficulty));
+
+// back to the menu from the game-over screen (to change difficulty)
+{
+  const back = (e) => { e.preventDefault(); if (state === 'over') setState('menu'); };
+  const menuBtn = document.getElementById('menu-return');
+  menuBtn.addEventListener('click', back);
+  menuBtn.addEventListener('touchstart', back, { passive: false });
+}
 
 // pause when the tab is hidden
 document.addEventListener('visibilitychange', () => {
@@ -975,7 +1206,7 @@ document.addEventListener('visibilitychange', () => {
 // ------------------------------------------------------------------ resize
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 }
@@ -987,6 +1218,57 @@ const camTarget = new THREE.Vector3();
 const camDesired = new THREE.Vector3();
 const tmpVec = new THREE.Vector3();
 
+// shared hull-damage handling; returns true when the hit sinks her
+function takeDamage(burstColor) {
+  if (invuln > 0) return false;
+  hull -= 1;
+  invuln = 1.8;
+  shake = prefersReducedMotion ? 0 : 1;
+  playHit();
+  burst(shipGroup.position.clone().setY(2), burstColor, 10, 0.8);
+  updateHud();
+  if (hull <= 0) { sinkShip(); return true; }
+  return false;
+}
+
+// the Revenant: spawns once the hold is heavy, hunts the player, sheers off after a ram.
+// It ignores wind and rocks (it's dead) — outrunning it means sailing downwind.
+function updateGhost(dt) {
+  const diff = DIFFICULTY_SETTINGS[currentDifficulty];
+  if (!ghostActive) {
+    if (score >= diff.ghostGold) spawnGhost();
+    return false;
+  }
+  if (ghostCooldown > 0) ghostCooldown -= dt;
+
+  const dx = shipGroup.position.x - ghostGroup.position.x;
+  const dz = shipGroup.position.z - ghostGroup.position.z;
+  const distG = Math.hypot(dx, dz);
+  let want = Math.atan2(dx, dz);
+  if (ghostCooldown > 0) want += Math.PI; // retreat after ramming
+  const dh = ((want - ghostHeading + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  const maxTurn = diff.ghostTurn * dt;
+  ghostHeading += Math.max(-maxTurn, Math.min(maxTurn, dh));
+  ghostGroup.position.x += Math.sin(ghostHeading) * diff.ghostSpeed * dt;
+  ghostGroup.position.z += Math.cos(ghostHeading) * diff.ghostSpeed * dt;
+  const gd = Math.hypot(ghostGroup.position.x, ghostGroup.position.z);
+  if (gd > MAP_R) {
+    ghostGroup.position.x *= MAP_R / gd;
+    ghostGroup.position.z *= MAP_R / gd;
+  }
+
+  // green arrow tracks the hunter
+  const rel = Math.atan2(-dx, -dz) - heading;
+  UI.ghostArrow.style.transform = `rotate(${(-rel * 180 / Math.PI) - 90}deg) translateX(21px)`;
+
+  if (distG < SHIP_R * 2 + 0.5 && ghostCooldown <= 0) {
+    ghostCooldown = 6;
+    speed *= 0.4;
+    if (takeDamage(0x66ffb2)) return true;
+  }
+  return false;
+}
+
 function updatePlaying(dt) {
   // steering
   steerInput = 0;
@@ -995,11 +1277,26 @@ function updatePlaying(dt) {
   if (isTouch) steerInput += touchSteer();
   steerInput = Math.max(-1, Math.min(1, steerInput));
 
-  const targetSpeed = sailLevel * SPEED_PER_SAIL;
+  // wind drifts toward a target bearing that re-rolls every so often
+  windTimer -= dt;
+  if (windTimer <= 0) {
+    windTarget = Math.random() * Math.PI * 2;
+    windTimer = 14 + Math.random() * 10;
+  }
+  const dw = ((windTarget - windDir + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  windDir += dw * Math.min(1, dt * 0.15);
+
+  // running with the wind is fast (×1.2), beating into it a crawl (×0.3)
+  const align = Math.cos(heading - windDir);
+  windFactor = 0.75 + 0.45 * align;
+  windFactorSmooth += (windFactor - windFactorSmooth) * Math.min(1, dt * 2);
+
+  const targetSpeed = sailLevel * SPEED_PER_SAIL * windFactor;
   speed += (targetSpeed - speed) * Math.min(1, dt * 0.8);
 
-  const speedFactor = 0.35 + 0.65 * Math.min(1, Math.abs(speed) / (MAX_SAIL * SPEED_PER_SAIL));
-  heading -= steerInput * TURN_RATE * speedFactor * dt;
+  // slow ships corner tightly, fast ships run wide — dropping sail is how you thread a reef
+  const speedNorm = Math.min(1, Math.abs(speed) / (MAX_SAIL * SPEED_PER_SAIL));
+  heading -= steerInput * TURN_RATE * (1.1 - 0.45 * speedNorm) * dt;
 
   fwd.set(Math.sin(heading), 0, Math.cos(heading));
   shipGroup.position.x += fwd.x * speed * dt;
@@ -1014,29 +1311,23 @@ function updatePlaying(dt) {
 
   // hazard collisions
   if (invuln > 0) invuln -= dt;
-  const hazards = rocks.concat(islands);
-  for (const h of hazards) {
+  const hitHazard = (h) => {
     const dx = shipGroup.position.x - h.x;
     const dz = shipGroup.position.z - h.z;
     const d = Math.hypot(dx, dz);
     const minD = h.r + SHIP_R;
-    if (d < minD) {
-      // push out along the normal
-      const push = (minD - d) / (d || 1);
-      shipGroup.position.x += dx * push;
-      shipGroup.position.z += dz * push;
-      speed *= -0.25;
-      if (invuln <= 0) {
-        hull -= 1;
-        invuln = 1.8;
-        shake = prefersReducedMotion ? 0 : 1;
-        playHit();
-        burst(shipGroup.position.clone().setY(2), 0xdff4f8, 10, 0.8);
-        updateHud();
-        if (hull <= 0) { sinkShip(); return; }
-      }
-    }
-  }
+    if (d >= minD) return false;
+    // push out along the normal
+    const push = (minD - d) / (d || 1);
+    shipGroup.position.x += dx * push;
+    shipGroup.position.z += dz * push;
+    speed *= -0.25;
+    return takeDamage(0xdff4f8);
+  };
+  for (const isl of islands) if (hitHazard(isl)) return;
+  for (let i = 0; i < activeRockCount; i++) if (hitHazard(rockPool[i])) return;
+
+  if (updateGhost(dt)) return;
 
   // treasure
   let nearest = null, nearestD = Infinity;
@@ -1045,9 +1336,9 @@ function updatePlaying(dt) {
     if (d < nearestD) { nearestD = d; nearest = c; }
     if (d < COLLECT_R) {
       score += 10;
-      if (score > bestScore) {
-        bestScore = score;
-        try { localStorage.setItem('plunder-run-best', String(bestScore)); } catch (e) {}
+      if (score > bestScores[currentDifficulty]) {
+        bestScores[currentDifficulty] = score;
+        try { localStorage.setItem(`plunder-run-best-${currentDifficulty}`, String(score)); } catch (e) {}
       }
       playCollect();
       burst(c.position.clone().setY(1.5), 0xffd766, 14);
@@ -1056,12 +1347,14 @@ function updatePlaying(dt) {
     }
   }
 
-  // compass points at the nearest chest, relative to the ship's heading
+  // compass — gold arrow to the nearest chest, cyan arrow showing where the wind blows
   if (nearest) {
     const wa = Math.atan2(nearest.position.x - shipGroup.position.x, nearest.position.z - shipGroup.position.z);
     const rel = wa - heading;
     UI.arrow.style.transform = `rotate(${(-rel * 180 / Math.PI) - 90}deg)`;
   }
+  UI.windArrow.style.transform = `rotate(${(-(windDir - heading) * 180 / Math.PI) - 90}deg) translateX(21px)`;
+  UI.sails.style.color = windFactor > 1.02 ? '#7be3ff' : windFactor < 0.6 ? 'var(--accent-3)' : 'var(--accent-2)';
 
   // wake foam
   foamTimer -= dt;
@@ -1112,6 +1405,25 @@ function loop(t) {
     shipGroup.rotation.set(pitch, heading, roll + heel);
   }
 
+  // the Revenant rides the same swell
+  if (ghostGroup.visible) {
+    const g = ghostGroup.position;
+    g.y = waveY(g.x, g.z, waterTime) * bobScale * 0.8 + 0.15;
+    ghostGroup.rotation.set(0, ghostHeading, Math.sin(waterTime * 0.9) * 0.06);
+  }
+
+  // sails billow with trim and wind
+  const sailTarget = (state === 'playing' || state === 'sinking')
+    ? 0.25 + 0.75 * (sailLevel / MAX_SAIL) * (0.35 + 0.65 * Math.min(1.2, windFactorSmooth))
+    : 1;
+  for (const s of shipParts.sails) s.scale.z += (sailTarget - s.scale.z) * Math.min(1, dt * 3);
+
+  // ghost warning banner timeout
+  if (warnTimer > 0) {
+    warnTimer -= dt;
+    if (warnTimer <= 0) UI.warning.style.display = 'none';
+  }
+
   // invulnerability blink
   shipGroup.visible = !(state === 'playing' && invuln > 0 && Math.floor(t / 90) % 2 === 0);
 
@@ -1120,7 +1432,7 @@ function loop(t) {
     c.userData.spin += dt * 0.8;
     c.position.y = waveY(c.position.x, c.position.z, waterTime) * 0.7 + 0.5;
     c.rotation.y = c.userData.spin;
-    c.children[2].material.opacity = 0.1 + 0.06 * Math.sin(waterTime * 2 + c.userData.spin); // beam pulse
+    c.userData.beam.material.opacity = 0.1 + 0.06 * Math.sin(waterTime * 2 + c.userData.spin); // beam pulse
   }
 
   // foam decay
@@ -1155,8 +1467,9 @@ function loop(t) {
     }
   }
 
-  // flag flutter
-  shipParts.flag.rotation.y = Math.sin(waterTime * 6) * 0.25;
+  // flag streams downwind, with flutter
+  const relWind = ((windDir - heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  shipParts.flag.rotation.y = relWind * 0.35 + Math.sin(waterTime * 6) * 0.25;
 
   // camera
   if (state === 'menu') {
@@ -1178,6 +1491,17 @@ function loop(t) {
   camera.lookAt(camTarget);
 
   renderer.render(scene, camera);
+}
+
+// test hooks, only when opened with #debug in the URL
+if (location.hash.includes('debug')) {
+  window.__debug = {
+    gold: (n) => { score = n; updateHud(); },
+    hurt: () => { invuln = 0; takeDamage(0xdff4f8); },
+    ghost: () => { if (state === 'playing' && !ghostActive) spawnGhost(); },
+    finish: () => { if (state === 'sinking') endGame(); },
+    state: () => ({ state, score, hull, sailLevel, speed, windFactor, ghostActive, currentDifficulty, bestScores }),
+  };
 }
 
 setState('menu');

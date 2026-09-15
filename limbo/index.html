@@ -51,6 +51,10 @@
     padding: 70px 16px 16px;
     max-width: 560px;
     margin: 0 auto;
+    overflow-y: auto;
+  }
+  @media (max-height: 860px) {
+    main { justify-content: flex-start; }
   }
 
   .panel {
@@ -179,7 +183,7 @@
     display: flex;
     gap: 8px;
   }
-  .input-row input {
+  .input-row input, .strat-grid input {
     flex: 1;
     min-width: 0;
     padding: 12px 14px;
@@ -280,6 +284,38 @@
     border-color: rgba(102, 255, 178, 0.5);
     background: rgba(102, 255, 178, 0.08);
     box-shadow: 0 0 15px rgba(102, 255, 178, 0.2);
+  }
+
+  /* ---- auto strategy ---- */
+  .strat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .strat-grid input { width: 100%; padding: 10px 12px; font-size: 14px; }
+  .strat-grid input:disabled { opacity: 0.35; }
+  .mini-label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .mode-chip { min-width: 74px; padding: 10px 12px; font-size: 12px; }
+  .mode-chip.adjust {
+    color: var(--accent-2);
+    border-color: rgba(70, 200, 255, 0.45);
+    background: rgba(70, 200, 255, 0.08);
+  }
+  #auto-status {
+    min-height: 16px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
   footer {
@@ -390,10 +426,43 @@
       </div>
       <div id="chance-line">Win chance 49.50% &nbsp;•&nbsp; pays 20.00</div>
     </div>
+    <div class="field">
+      <label>Auto strategy</label>
+      <div class="input-row">
+        <button class="chip strat-preset" data-strat="flat">Flat</button>
+        <button class="chip strat-preset" data-strat="martingale">Martingale</button>
+        <button class="chip strat-preset" data-strat="paroli">Paroli</button>
+      </div>
+      <div class="strat-grid">
+        <div>
+          <span class="mini-label">On loss</span>
+          <div class="input-row">
+            <button class="chip mode-chip" id="loss-mode">Reset</button>
+            <input id="loss-pct" inputmode="decimal" autocomplete="off" value="100" aria-label="Percent bet change on loss">
+          </div>
+        </div>
+        <div>
+          <span class="mini-label">On win</span>
+          <div class="input-row">
+            <button class="chip mode-chip" id="win-mode">Reset</button>
+            <input id="win-pct" inputmode="decimal" autocomplete="off" value="100" aria-label="Percent bet change on win">
+          </div>
+        </div>
+        <div>
+          <span class="mini-label">Stop at profit</span>
+          <input id="stop-profit" inputmode="decimal" autocomplete="off" placeholder="off">
+        </div>
+        <div>
+          <span class="mini-label">Stop at loss</span>
+          <input id="stop-loss" inputmode="decimal" autocomplete="off" placeholder="off">
+        </div>
+      </div>
+    </div>
     <div id="button-row">
       <button id="bet-btn">ROLL &nbsp;·&nbsp; SPACE</button>
       <button id="auto-btn">AUTO</button>
     </div>
+    <div id="auto-status"></div>
   </div>
 
   <footer>Play money only — nothing here is real gambling. Rolls carry a 1% house edge, just like the real thing, which is exactly why the house always wins.</footer>
@@ -419,6 +488,13 @@ let rolling = false;
 let autoOn = false;
 let autoTimer = null;
 let history = [];
+let debugQueue = [];          // forced RNG draws, fed only by the #debug hooks
+
+// auto-bet strategy: what happens to the bet after each roll
+const strategy = { lossMode: 'reset', lossPct: 100, winMode: 'reset', winPct: 100 };
+let autoBase = 0;             // bet when auto started — what 'reset' returns to
+let autoBet = 0;              // the live bet auto is currently placing
+let autoStartBal = 0;         // balance when auto started, for profit tracking
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const fmt = (n) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -435,6 +511,18 @@ try {
   if (lb) document.getElementById('bet-input').value = lb;
   const lt = localStorage.getItem('limbo-target');
   if (lt) document.getElementById('target-input').value = lt;
+  const st = JSON.parse(localStorage.getItem('limbo-strategy') || 'null');
+  if (st) {
+    if (st.lossMode === 'reset' || st.lossMode === 'inc') strategy.lossMode = st.lossMode;
+    if (st.winMode === 'reset' || st.winMode === 'inc') strategy.winMode = st.winMode;
+    if (isFinite(st.lossPct)) strategy.lossPct = st.lossPct;
+    if (isFinite(st.winPct)) strategy.winPct = st.winPct;
+  }
+  const stops = JSON.parse(localStorage.getItem('limbo-stops') || 'null');
+  if (stops) {
+    document.getElementById('stop-profit').value = stops.p || '';
+    document.getElementById('stop-loss').value = stops.l || '';
+  }
 } catch (e) {}
 
 function persist() {
@@ -444,6 +532,8 @@ function persist() {
     localStorage.setItem('limbo-bigwin', String(bigWin));
     localStorage.setItem('limbo-bet', UI.bet.value);
     localStorage.setItem('limbo-target', UI.target.value);
+    localStorage.setItem('limbo-strategy', JSON.stringify(strategy));
+    localStorage.setItem('limbo-stops', JSON.stringify({ p: UI.stopProfit.value, l: UI.stopLoss.value }));
   } catch (e) {}
 }
 
@@ -460,6 +550,13 @@ const UI = {
   chance: document.getElementById('chance-line'),
   betBtn: document.getElementById('bet-btn'),
   autoBtn: document.getElementById('auto-btn'),
+  lossMode: document.getElementById('loss-mode'),
+  winMode: document.getElementById('win-mode'),
+  lossPct: document.getElementById('loss-pct'),
+  winPct: document.getElementById('win-pct'),
+  stopProfit: document.getElementById('stop-profit'),
+  stopLoss: document.getElementById('stop-loss'),
+  autoStatus: document.getElementById('auto-status'),
 };
 
 // ------------------------------------------------------------------ the roll
@@ -692,7 +789,7 @@ function placeBet(forcedU) {
   balance = round2(balance - bet);
   updateHud();
 
-  const result = rollMultiplier(forcedU);
+  const result = rollMultiplier(forcedU !== undefined ? forcedU : (debugQueue.length ? debugQueue.shift() : undefined));
   const win = result >= target;
 
   startRoll(result, () => {
@@ -719,33 +816,111 @@ function placeBet(forcedU) {
     updateHud();
     persist();
 
-    if (autoOn) {
-      if (readBet() > balance) stopAuto();
-      else autoTimer = setTimeout(() => { if (autoOn) placeBet(); }, AUTO_DELAY);
-    }
+    if (autoOn) stepAuto(win);
   });
 }
 
-// ------------------------------------------------------------------ auto mode
-function stopAuto() {
+// ------------------------------------------------------------------ auto mode + strategy
+function setAutoStatus(text) { UI.autoStatus.textContent = text; }
+
+function stopAuto(reason = '') {
   autoOn = false;
   clearTimeout(autoTimer);
   UI.autoBtn.classList.remove('on');
   UI.autoBtn.textContent = 'AUTO';
+  setAutoStatus(reason);
 }
+
 function toggleAuto() {
   initAudio();
   if (autoOn) { stopAuto(); return; }
+  const bet = readBet();
+  if (!isFinite(bet) || bet > balance) { flashInvalid(UI.bet); return; }
+  autoBase = autoBet = bet;
+  autoStartBal = balance;
   autoOn = true;
   UI.autoBtn.classList.add('on');
   UI.autoBtn.textContent = 'STOP';
+  setAutoStatus(`Auto · profit +0.00 · bet ${fmt(autoBet)}`);
   if (!rolling) placeBet();
+}
+
+// after each auto roll: check stop limits, then size the next bet by the strategy
+function stepAuto(win) {
+  const profit = round2(balance - autoStartBal);
+  const sp = parseFloat(UI.stopProfit.value);
+  const sl = parseFloat(UI.stopLoss.value);
+  if (isFinite(sp) && sp > 0 && profit >= sp) {
+    stopAuto(`Auto stopped · profit target hit (+${fmt(profit)})`);
+    return;
+  }
+  if (isFinite(sl) && sl > 0 && -profit >= sl) {
+    stopAuto(`Auto stopped · loss limit hit (${fmt(profit)})`);
+    return;
+  }
+  const mode = win ? strategy.winMode : strategy.lossMode;
+  const pct = win ? strategy.winPct : strategy.lossPct;
+  autoBet = mode === 'reset' ? autoBase : Math.max(0.01, round2(autoBet * (1 + pct / 100)));
+  if (autoBet > balance) {
+    stopAuto(`Auto stopped · bankroll can't cover ${fmt(autoBet)}`);
+    return;
+  }
+  UI.bet.value = autoBet.toFixed(2);
+  updateChanceLine();
+  setAutoStatus(`Auto · profit ${profit >= 0 ? '+' : ''}${fmt(profit)} · bet ${fmt(autoBet)}`);
+  autoTimer = setTimeout(() => { if (autoOn) placeBet(); }, AUTO_DELAY);
 }
 
 // auto-betting your fake fortune away while the tab is hidden would be rude
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && autoOn) stopAuto();
+  if (document.hidden && autoOn) stopAuto('Auto paused — tab hidden');
 });
+
+// ------------------------------------------------------------------ strategy UI
+function applyStrategyToUI() {
+  UI.lossMode.textContent = strategy.lossMode === 'reset' ? 'Reset' : '± %';
+  UI.winMode.textContent = strategy.winMode === 'reset' ? 'Reset' : '± %';
+  UI.lossMode.classList.toggle('adjust', strategy.lossMode === 'inc');
+  UI.winMode.classList.toggle('adjust', strategy.winMode === 'inc');
+  UI.lossPct.disabled = strategy.lossMode === 'reset';
+  UI.winPct.disabled = strategy.winMode === 'reset';
+  UI.lossPct.value = strategy.lossPct;
+  UI.winPct.value = strategy.winPct;
+  const preset =
+    strategy.lossMode === 'reset' && strategy.winMode === 'reset' ? 'flat' :
+    strategy.lossMode === 'inc' && strategy.lossPct === 100 && strategy.winMode === 'reset' ? 'martingale' :
+    strategy.winMode === 'inc' && strategy.winPct === 100 && strategy.lossMode === 'reset' ? 'paroli' : null;
+  document.querySelectorAll('.strat-preset').forEach(b => b.classList.toggle('active', b.dataset.strat === preset));
+}
+
+document.querySelectorAll('.strat-preset').forEach(b => b.addEventListener('click', () => {
+  initAudio();
+  const s = b.dataset.strat;
+  if (s === 'flat') Object.assign(strategy, { lossMode: 'reset', winMode: 'reset' });
+  if (s === 'martingale') Object.assign(strategy, { lossMode: 'inc', lossPct: 100, winMode: 'reset' });
+  if (s === 'paroli') Object.assign(strategy, { lossMode: 'reset', winMode: 'inc', winPct: 100 });
+  applyStrategyToUI();
+  persist();
+}));
+UI.lossMode.addEventListener('click', () => {
+  strategy.lossMode = strategy.lossMode === 'reset' ? 'inc' : 'reset';
+  applyStrategyToUI(); persist();
+});
+UI.winMode.addEventListener('click', () => {
+  strategy.winMode = strategy.winMode === 'reset' ? 'inc' : 'reset';
+  applyStrategyToUI(); persist();
+});
+UI.lossPct.addEventListener('input', () => {
+  const v = parseFloat(UI.lossPct.value);
+  if (isFinite(v)) strategy.lossPct = Math.max(-99, Math.min(900, v));
+  persist();
+});
+UI.winPct.addEventListener('input', () => {
+  const v = parseFloat(UI.winPct.value);
+  if (isFinite(v)) strategy.winPct = Math.max(-99, Math.min(900, v));
+  persist();
+});
+[UI.stopProfit, UI.stopLoss].forEach(inp => inp.addEventListener('input', persist));
 
 // ------------------------------------------------------------------ wire up
 UI.betBtn.addEventListener('click', () => placeBet());
@@ -771,8 +946,8 @@ document.querySelectorAll('.preset').forEach(p => p.addEventListener('click', ()
   });
 });
 window.addEventListener('keydown', (e) => {
-  if (e.target === UI.bet || e.target === UI.target) {
-    if (e.code === 'Enter') { e.target.blur(); placeBet(); }
+  if (e.target.tagName === 'INPUT') {
+    if (e.code === 'Enter') { e.target.blur(); if (e.target === UI.bet || e.target === UI.target) placeBet(); }
     return;
   }
   if (e.target.tagName === 'BUTTON') return; // let a focused button handle Space itself
@@ -822,11 +997,13 @@ function drawBg(dt, t) {
 if (location.hash.includes('debug')) {
   window.__debug = {
     roll: (u) => placeBet(u),   // force the RNG draw: u=0.001 → ~990×, u=0.99 → 1.00×
-    state: () => ({ balance, best, bigWin, streak, rolling, autoOn }),
+    queue: (arr) => { debugQueue = arr.slice(); }, // forced draws consumed by upcoming rolls (auto included)
+    state: () => ({ balance, best, bigWin, streak, rolling, autoOn, autoBet, autoBase, strategy: { ...strategy } }),
     gold: (n) => { balance = round2(n); updateHud(); persist(); },
   };
 }
 
+applyStrategyToUI();
 updateHud();
 requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
 </script>

@@ -85,6 +85,21 @@
   #best-pill { color: var(--muted); font-size: 12px; }
   #streak-pill { color: var(--accent-2); font-size: 12px; }
 
+  .toggle-btn {
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--muted);
+    font-size: 12px;
+    transition: all 0.2s ease;
+  }
+  .toggle-btn:hover { color: var(--fg); border-color: rgba(232, 234, 242, 0.3); }
+  .toggle-btn.on {
+    color: var(--accent-2);
+    border-color: rgba(70, 200, 255, 0.5);
+    background: rgba(70, 200, 255, 0.08);
+    box-shadow: 0 0 12px rgba(70, 200, 255, 0.2);
+  }
+
   /* ---- stage ---- */
   #stage {
     display: flex;
@@ -392,6 +407,8 @@
     <div class="panel stat-pill" id="balance-pill">Gold: 1,000.00</div>
     <div class="panel stat-pill" id="best-pill">Best: 1,000</div>
     <div class="panel stat-pill" id="streak-pill">Streak: 0</div>
+    <button class="panel stat-pill toggle-btn" id="fast-toggle" aria-label="Toggle fast mode" title="Fast mode (F)">⚡ Fast</button>
+    <button class="panel stat-pill toggle-btn" id="sound-toggle" aria-label="Toggle sound" title="Sound (S)">🔊</button>
   </div>
 
   <div id="stage">
@@ -476,6 +493,7 @@ const MIN_TARGET = 1.01;
 const START_GOLD = 1000;
 const HISTORY_MAX = 10;
 const AUTO_DELAY = 550;       // ms between auto rolls (after the count-up)
+const AUTO_DELAY_FAST = 140;  // auto cadence in fast mode
 
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -489,6 +507,8 @@ let autoOn = false;
 let autoTimer = null;
 let history = [];
 let debugQueue = [];          // forced RNG draws, fed only by the #debug hooks
+let soundOn = true;
+let fastMode = false;         // skip the count-up, tighten the auto cadence
 
 // auto-bet strategy: what happens to the bet after each roll
 const strategy = { lossMode: 'reset', lossPct: 100, winMode: 'reset', winPct: 100 };
@@ -523,6 +543,8 @@ try {
     document.getElementById('stop-profit').value = stops.p || '';
     document.getElementById('stop-loss').value = stops.l || '';
   }
+  soundOn = localStorage.getItem('limbo-sound') !== 'off';
+  fastMode = localStorage.getItem('limbo-fast') === 'on';
 } catch (e) {}
 
 function persist() {
@@ -534,6 +556,8 @@ function persist() {
     localStorage.setItem('limbo-target', UI.target.value);
     localStorage.setItem('limbo-strategy', JSON.stringify(strategy));
     localStorage.setItem('limbo-stops', JSON.stringify({ p: UI.stopProfit.value, l: UI.stopLoss.value }));
+    localStorage.setItem('limbo-sound', soundOn ? 'on' : 'off');
+    localStorage.setItem('limbo-fast', fastMode ? 'on' : 'off');
   } catch (e) {}
 }
 
@@ -695,7 +719,7 @@ function initAudio() {
   try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
 }
 function bleep(freq, dur, type = 'triangle', vol = 0.1, delay = 0) {
-  if (!audioCtx || audioCtx.state === 'suspended') return;
+  if (!soundOn || !audioCtx || audioCtx.state === 'suspended') return;
   const t0 = audioCtx.currentTime + delay;
   const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
   osc.type = type;
@@ -721,8 +745,8 @@ function startRoll(result, onSettle) {
   animFrom = 1;
   animResult = result;
   animT = 0;
-  // longer count-up for bigger numbers; instant under reduced motion
-  animDur = (prefersReducedMotion || window.__fastRolls) ? 0 : 0.7 + Math.min(0.9, Math.log10(result) * 0.45);
+  // longer count-up for bigger numbers; instant in fast mode or under reduced motion
+  animDur = (prefersReducedMotion || fastMode || window.__fastRolls) ? 0 : 0.7 + Math.min(0.9, Math.log10(result) * 0.45);
   pendingSettle = onSettle;
   UI.result.className = '';
   UI.outcome.textContent = '';
@@ -868,7 +892,7 @@ function stepAuto(win) {
   UI.bet.value = autoBet.toFixed(2);
   updateChanceLine();
   setAutoStatus(`Auto · profit ${profit >= 0 ? '+' : ''}${fmt(profit)} · bet ${fmt(autoBet)}`);
-  autoTimer = setTimeout(() => { if (autoOn) placeBet(); }, AUTO_DELAY);
+  autoTimer = setTimeout(() => { if (autoOn) placeBet(); }, fastMode ? AUTO_DELAY_FAST : AUTO_DELAY);
 }
 
 // auto-betting your fake fortune away while the tab is hidden would be rude
@@ -922,6 +946,28 @@ UI.winPct.addEventListener('input', () => {
 });
 [UI.stopProfit, UI.stopLoss].forEach(inp => inp.addEventListener('input', persist));
 
+// ------------------------------------------------------------------ fast + sound toggles
+const fastToggle = document.getElementById('fast-toggle');
+const soundToggle = document.getElementById('sound-toggle');
+function updateToggles() {
+  fastToggle.classList.toggle('on', fastMode);
+  soundToggle.classList.toggle('on', soundOn);
+  soundToggle.textContent = soundOn ? '🔊' : '🔇';
+}
+function toggleFast() {
+  fastMode = !fastMode;
+  updateToggles();
+  persist();
+}
+function toggleSound() {
+  soundOn = !soundOn;
+  if (soundOn) { initAudio(); bleep(660, 0.08); } // tiny confirmation blip
+  updateToggles();
+  persist();
+}
+fastToggle.addEventListener('click', toggleFast);
+soundToggle.addEventListener('click', toggleSound);
+
 // ------------------------------------------------------------------ wire up
 UI.betBtn.addEventListener('click', () => placeBet());
 UI.autoBtn.addEventListener('click', toggleAuto);
@@ -953,6 +999,8 @@ window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'BUTTON') return; // let a focused button handle Space itself
   if (e.code === 'Space') { e.preventDefault(); placeBet(); }
   if (e.code === 'KeyA') toggleAuto();
+  if (e.code === 'KeyF') toggleFast();
+  if (e.code === 'KeyS') toggleSound();
 });
 
 // ------------------------------------------------------------------ background — slow-falling embers
@@ -1004,6 +1052,7 @@ if (location.hash.includes('debug')) {
 }
 
 applyStrategyToUI();
+updateToggles();
 updateHud();
 requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
 </script>

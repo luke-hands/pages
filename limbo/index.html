@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="description" content="Limbo — a play-money multiplier betting game. Pick a target, place your bet, watch the number climb.">
+<title>Limbo</title>
+<style>
+  :root {
+    --bg: #07080f;
+    --fg: #e8eaf2;
+    --muted: #8a90a6;
+    --accent-1: #7c6cff;
+    --accent-2: #46c8ff;
+    --accent-3: #ff6ec7;
+    --gold: #ffd766;
+    --win: #66ffb2;
+    --loss: #ff6ec7;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  canvas#bg {
+    position: fixed;
+    inset: 0;
+    display: block;
+    z-index: 0;
+  }
+
+  main {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 70px 16px 16px;
+    max-width: 560px;
+    margin: 0 auto;
+    overflow-y: auto;
+  }
+  @media (max-height: 860px) {
+    main { justify-content: flex-start; }
+  }
+
+  .panel {
+    background: rgba(7, 8, 15, 0.55);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 234, 242, 0.12);
+    border-radius: 20px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  }
+
+  /* ---- top row ---- */
+  #top-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .stat-pill {
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  #balance-pill { color: var(--gold); text-shadow: 0 0 12px rgba(255, 215, 102, 0.4); }
+  #best-pill { color: var(--muted); font-size: 12px; }
+  #streak-pill { color: var(--accent-2); font-size: 12px; }
+
+  .toggle-btn {
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--muted);
+    font-size: 12px;
+    transition: all 0.2s ease;
+  }
+  .toggle-btn:hover { color: var(--fg); border-color: rgba(232, 234, 242, 0.3); }
+  .toggle-btn.on {
+    color: var(--accent-2);
+    border-color: rgba(70, 200, 255, 0.5);
+    background: rgba(70, 200, 255, 0.08);
+    box-shadow: 0 0 12px rgba(70, 200, 255, 0.2);
+  }
+
+  /* ---- stage ---- */
+  #stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-height: 170px;
+    justify-content: center;
+  }
+  #result-display {
+    font-size: clamp(4rem, 18vw, 7rem);
+    font-weight: 900;
+    letter-spacing: -2px;
+    line-height: 1;
+    color: var(--fg);
+    text-shadow: 0 0 40px rgba(124, 108, 255, 0.35);
+    font-variant-numeric: tabular-nums;
+    transition: color 0.15s ease;
+  }
+  #result-display .x { font-size: 0.45em; font-weight: 800; color: var(--muted); }
+  #result-display.win { color: var(--win); text-shadow: 0 0 50px rgba(102, 255, 178, 0.55); }
+  #result-display.loss { color: var(--loss); text-shadow: 0 0 50px rgba(255, 110, 199, 0.45); }
+  #outcome-label {
+    height: 22px;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 1px;
+  }
+  #outcome-label.win { color: var(--win); }
+  #outcome-label.loss { color: var(--loss); }
+
+  /* ---- history ---- */
+  #history {
+    display: flex;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    max-width: 100%;
+    justify-content: center;
+    min-height: 26px;
+  }
+  .hist-pill {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: rgba(232, 234, 242, 0.05);
+    border: 1px solid rgba(232, 234, 242, 0.1);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .hist-pill.win { color: var(--win); border-color: rgba(102, 255, 178, 0.35); }
+  .hist-pill.loss { color: var(--loss); border-color: rgba(255, 110, 199, 0.3); }
+
+  /* ---- bankroll chart ---- */
+  #chart-panel {
+    width: 100%;
+    padding: 10px 14px 6px;
+  }
+  #chart-panel .chart-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    font-weight: 700;
+    margin-bottom: 2px;
+    display: flex;
+    justify-content: space-between;
+    font-variant-numeric: tabular-nums;
+  }
+  canvas#chart {
+    display: block;
+    width: 100%;
+    height: 72px;
+  }
+
+  /* ---- controls ---- */
+  #controls {
+    width: 100%;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .field label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .input-row {
+    display: flex;
+    gap: 8px;
+  }
+  .input-row input, .strat-grid input {
+    flex: 1;
+    min-width: 0;
+    padding: 12px 14px;
+    background: rgba(232, 234, 242, 0.05);
+    border: 1px solid rgba(232, 234, 242, 0.12);
+    border-radius: 12px;
+    color: var(--fg);
+    font-size: 16px;
+    font-weight: 700;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .input-row input:focus {
+    border-color: var(--accent-1);
+    box-shadow: 0 0 14px rgba(124, 108, 255, 0.25);
+  }
+  .input-row input.invalid {
+    border-color: var(--loss);
+    box-shadow: 0 0 14px rgba(255, 110, 199, 0.3);
+  }
+  .chip {
+    padding: 12px 14px;
+    background: rgba(232, 234, 242, 0.05);
+    border: 1px solid rgba(232, 234, 242, 0.12);
+    border-radius: 12px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+  }
+  .chip:hover, .chip:active {
+    color: var(--fg);
+    border-color: rgba(232, 234, 242, 0.3);
+    background: rgba(232, 234, 242, 0.09);
+  }
+  .chip.active {
+    color: var(--fg);
+    border-color: var(--accent-1);
+    background: rgba(124, 108, 255, 0.15);
+  }
+  #chance-line {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  #button-row {
+    display: flex;
+    gap: 10px;
+  }
+  #bet-btn {
+    flex: 1;
+    padding: 16px;
+    border: none;
+    border-radius: 14px;
+    background: linear-gradient(120deg, var(--accent-1), var(--accent-2));
+    color: #fff;
+    font-size: 17px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    cursor: pointer;
+    font-family: inherit;
+    box-shadow: 0 6px 25px rgba(124, 108, 255, 0.35);
+    transition: transform 0.1s ease, filter 0.2s ease, box-shadow 0.2s ease;
+  }
+  #bet-btn:hover { filter: brightness(1.1); }
+  #bet-btn:active { transform: translateY(1px); }
+  #bet-btn:disabled {
+    filter: grayscale(0.7) brightness(0.6);
+    cursor: default;
+    transform: none;
+  }
+  #bet-btn.loan {
+    background: linear-gradient(120deg, #b8860b, var(--gold));
+    box-shadow: 0 6px 25px rgba(255, 215, 102, 0.3);
+    color: #1a1405;
+  }
+  #auto-btn {
+    padding: 16px 20px;
+    border-radius: 14px;
+    background: rgba(232, 234, 242, 0.05);
+    border: 1px solid rgba(232, 234, 242, 0.15);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+  }
+  #auto-btn.on {
+    color: var(--win);
+    border-color: rgba(102, 255, 178, 0.5);
+    background: rgba(102, 255, 178, 0.08);
+    box-shadow: 0 0 15px rgba(102, 255, 178, 0.2);
+  }
+
+  /* ---- auto strategy ---- */
+  .strat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .strat-grid input { width: 100%; padding: 10px 12px; font-size: 14px; }
+  .strat-grid input:disabled { opacity: 0.35; }
+  .mini-label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .mode-chip { min-width: 74px; padding: 10px 12px; font-size: 12px; }
+  .mode-chip.adjust {
+    color: var(--accent-2);
+    border-color: rgba(70, 200, 255, 0.45);
+    background: rgba(70, 200, 255, 0.08);
+  }
+  #auto-status {
+    min-height: 16px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  footer {
+    font-size: 10.5px;
+    color: var(--muted);
+    text-align: center;
+    letter-spacing: 0.3px;
+    opacity: 0.8;
+  }
+
+  @media (max-height: 700px) {
+    main { gap: 10px; padding-top: 62px; }
+    #stage { min-height: 120px; }
+    #controls { padding: 14px; gap: 10px; }
+    canvas#chart { height: 52px; }
+  }
+
+  .back-to-gallery {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 99999;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(7, 8, 15, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 234, 242, 0.15);
+    border-radius: 999px;
+    color: #e8eaf2;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    pointer-events: auto;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  .back-to-gallery:hover {
+    background: rgba(124, 108, 255, 0.2);
+    border-color: rgba(124, 108, 255, 0.6);
+    color: #ffffff;
+    box-shadow: 0 0 15px rgba(124, 108, 255, 0.5);
+    transform: translateX(-50%) translateY(-1px);
+  }
+  .back-to-gallery:active {
+    transform: translateX(-50%) translateY(1px);
+  }
+  @media (max-width: 768px) {
+    .back-to-gallery {
+      top: 15px;
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .back-to-gallery {
+      transition: none;
+    }
+  }
+</style>
+</head>
+<body>
+    <a href="../index.html" class="back-to-gallery" aria-label="Back to Gallery">&larr; Back to Gallery</a>
+
+<canvas id="bg" aria-hidden="true"></canvas>
+
+<main>
+  <div id="top-row">
+    <div class="panel stat-pill" id="balance-pill">Gold: 1,000.00</div>
+    <div class="panel stat-pill" id="best-pill">Best: 1,000</div>
+    <div class="panel stat-pill" id="streak-pill">Streak: 0</div>
+    <button class="panel stat-pill toggle-btn" id="fast-toggle" aria-label="Toggle fast mode" title="Fast mode (F)">⚡ Fast</button>
+    <button class="panel stat-pill toggle-btn" id="sound-toggle" aria-label="Toggle sound" title="Sound (S)">🔊</button>
+  </div>
+
+  <div id="stage">
+    <div id="result-display">1.00<span class="x">×</span></div>
+    <div id="outcome-label"></div>
+    <div id="history"></div>
+  </div>
+
+  <div id="chart-panel" class="panel">
+    <div class="chart-label"><span>Session bankroll</span><span id="chart-range"></span></div>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div id="controls" class="panel">
+    <div class="field">
+      <label for="bet-input">Bet</label>
+      <div class="input-row">
+        <button class="chip" id="bet-half">½</button>
+        <input id="bet-input" inputmode="decimal" autocomplete="off" value="10">
+        <button class="chip" id="bet-double">2×</button>
+        <button class="chip" id="bet-max">MAX</button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="target-input">Target multiplier</label>
+      <div class="input-row">
+        <input id="target-input" inputmode="decimal" autocomplete="off" value="2.00">
+        <button class="chip preset" data-target="1.5">1.5×</button>
+        <button class="chip preset" data-target="2">2×</button>
+        <button class="chip preset" data-target="10">10×</button>
+        <button class="chip preset" data-target="100">100×</button>
+      </div>
+      <div id="chance-line">Win chance 49.50% &nbsp;•&nbsp; pays 20.00</div>
+    </div>
+    <div class="field">
+      <label>Auto strategy</label>
+      <div class="input-row">
+        <button class="chip strat-preset" data-strat="flat">Flat</button>
+        <button class="chip strat-preset" data-strat="martingale">Martingale</button>
+        <button class="chip strat-preset" data-strat="paroli">Paroli</button>
+      </div>
+      <div class="strat-grid">
+        <div>
+          <span class="mini-label">On loss</span>
+          <div class="input-row">
+            <button class="chip mode-chip" id="loss-mode">Reset</button>
+            <input id="loss-pct" inputmode="decimal" autocomplete="off" value="100" aria-label="Percent bet change on loss">
+          </div>
+        </div>
+        <div>
+          <span class="mini-label">On win</span>
+          <div class="input-row">
+            <button class="chip mode-chip" id="win-mode">Reset</button>
+            <input id="win-pct" inputmode="decimal" autocomplete="off" value="100" aria-label="Percent bet change on win">
+          </div>
+        </div>
+        <div>
+          <span class="mini-label">Stop at profit</span>
+          <input id="stop-profit" inputmode="decimal" autocomplete="off" placeholder="off">
+        </div>
+        <div>
+          <span class="mini-label">Stop at loss</span>
+          <input id="stop-loss" inputmode="decimal" autocomplete="off" placeholder="off">
+        </div>
+      </div>
+    </div>
+    <div id="button-row">
+      <button id="bet-btn">ROLL &nbsp;·&nbsp; SPACE</button>
+      <button id="auto-btn">AUTO</button>
+    </div>
+    <div id="auto-status"></div>
+  </div>
+
+  <footer>Play money only — nothing here is real gambling. Rolls carry a 1% house edge, just like the real thing, which is exactly why the house always wins.</footer>
+</main>
+
+<script>
+// ------------------------------------------------------------------ constants
+const HOUSE = 0.99;           // 1% edge: P(roll ≥ t) = 0.99 / t
+const MAX_MULT = 1000000;
+const MIN_TARGET = 1.01;
+const START_GOLD = 1000;
+const HISTORY_MAX = 10;
+const AUTO_DELAY = 550;       // ms between auto rolls (after the count-up)
+const AUTO_DELAY_FAST = 140;  // auto cadence in fast mode
+
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ------------------------------------------------------------------ state
+let balance = START_GOLD;
+let best = START_GOLD;        // bankroll high-water mark — the gallery trophy stat
+let bigWin = 0;               // biggest target ever hit, for bragging
+let streak = 0;
+let rolling = false;
+let autoOn = false;
+let autoTimer = null;
+let history = [];
+let debugQueue = [];          // forced RNG draws, fed only by the #debug hooks
+let soundOn = true;
+let fastMode = false;         // skip the count-up, tighten the auto cadence
+
+// auto-bet strategy: what happens to the bet after each roll
+const strategy = { lossMode: 'reset', lossPct: 100, winMode: 'reset', winPct: 100 };
+let autoBase = 0;             // bet when auto started — what 'reset' returns to
+let autoBet = 0;              // the live bet auto is currently placing
+let autoStartBal = 0;         // balance when auto started, for profit tracking
+
+const round2 = (n) => Math.round(n * 100) / 100;
+const fmt = (n) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtInt = (n) => Math.floor(n).toLocaleString('en-US');
+
+try {
+  const b = localStorage.getItem('limbo-balance');
+  if (b !== null) balance = round2(parseFloat(b)) || 0;
+  const hw = localStorage.getItem('limbo-best');
+  if (hw) best = parseInt(hw, 10) || START_GOLD;
+  const bw = localStorage.getItem('limbo-bigwin');
+  if (bw) bigWin = parseFloat(bw) || 0;
+  const lb = localStorage.getItem('limbo-bet');
+  if (lb) document.getElementById('bet-input').value = lb;
+  const lt = localStorage.getItem('limbo-target');
+  if (lt) document.getElementById('target-input').value = lt;
+  const st = JSON.parse(localStorage.getItem('limbo-strategy') || 'null');
+  if (st) {
+    if (st.lossMode === 'reset' || st.lossMode === 'inc') strategy.lossMode = st.lossMode;
+    if (st.winMode === 'reset' || st.winMode === 'inc') strategy.winMode = st.winMode;
+    if (isFinite(st.lossPct)) strategy.lossPct = st.lossPct;
+    if (isFinite(st.winPct)) strategy.winPct = st.winPct;
+  }
+  const stops = JSON.parse(localStorage.getItem('limbo-stops') || 'null');
+  if (stops) {
+    document.getElementById('stop-profit').value = stops.p || '';
+    document.getElementById('stop-loss').value = stops.l || '';
+  }
+  soundOn = localStorage.getItem('limbo-sound') !== 'off';
+  fastMode = localStorage.getItem('limbo-fast') === 'on';
+} catch (e) {}
+
+function persist() {
+  try {
+    localStorage.setItem('limbo-balance', String(balance));
+    localStorage.setItem('limbo-best', String(Math.floor(best)));
+    localStorage.setItem('limbo-bigwin', String(bigWin));
+    localStorage.setItem('limbo-bet', UI.bet.value);
+    localStorage.setItem('limbo-target', UI.target.value);
+    localStorage.setItem('limbo-strategy', JSON.stringify(strategy));
+    localStorage.setItem('limbo-stops', JSON.stringify({ p: UI.stopProfit.value, l: UI.stopLoss.value }));
+    localStorage.setItem('limbo-sound', soundOn ? 'on' : 'off');
+    localStorage.setItem('limbo-fast', fastMode ? 'on' : 'off');
+  } catch (e) {}
+}
+
+// ------------------------------------------------------------------ UI refs
+const UI = {
+  balance: document.getElementById('balance-pill'),
+  best: document.getElementById('best-pill'),
+  streak: document.getElementById('streak-pill'),
+  result: document.getElementById('result-display'),
+  outcome: document.getElementById('outcome-label'),
+  history: document.getElementById('history'),
+  bet: document.getElementById('bet-input'),
+  target: document.getElementById('target-input'),
+  chance: document.getElementById('chance-line'),
+  betBtn: document.getElementById('bet-btn'),
+  autoBtn: document.getElementById('auto-btn'),
+  lossMode: document.getElementById('loss-mode'),
+  winMode: document.getElementById('win-mode'),
+  lossPct: document.getElementById('loss-pct'),
+  winPct: document.getElementById('win-pct'),
+  stopProfit: document.getElementById('stop-profit'),
+  stopLoss: document.getElementById('stop-loss'),
+  autoStatus: document.getElementById('auto-status'),
+};
+
+// ------------------------------------------------------------------ the roll
+// P(roll ≥ t) = HOUSE / t, floored to 2 decimals, capped at MAX_MULT
+function rollMultiplier(u = Math.random()) {
+  const U = Math.max(u, 1e-9);
+  return Math.min(MAX_MULT, Math.max(1, Math.floor((HOUSE / U) * 100) / 100));
+}
+
+// ------------------------------------------------------------------ inputs
+function readBet() {
+  const v = round2(parseFloat(UI.bet.value.replace(/,/g, '')));
+  return isFinite(v) && v >= 0.01 ? v : NaN;
+}
+function readTarget() {
+  const v = round2(parseFloat(UI.target.value.replace(/,/g, '')));
+  return isFinite(v) ? Math.min(MAX_MULT, Math.max(MIN_TARGET, v)) : NaN;
+}
+function flashInvalid(input) {
+  input.classList.add('invalid');
+  setTimeout(() => input.classList.remove('invalid'), 500);
+}
+
+function updateChanceLine() {
+  const bet = readBet(), target = readTarget();
+  if (!isFinite(target)) { UI.chance.textContent = '—'; return; }
+  const chance = Math.min(0.99, HOUSE / target) * 100;
+  const pays = isFinite(bet) ? fmt(round2(bet * target)) : '—';
+  UI.chance.textContent = `Win chance ${chance.toFixed(2)}% • pays ${pays}`;
+}
+
+function updateHud() {
+  const broke = balance < 0.01;
+  UI.balance.textContent = `Gold: ${fmt(balance)}`;
+  UI.best.textContent = `Best: ${fmtInt(best)}`;
+  UI.streak.textContent = streak >= 0 ? `Streak: ${streak}` : `Cold: ${-streak}`;
+  UI.streak.style.color = streak > 2 ? 'var(--win)' : streak < -2 ? 'var(--loss)' : 'var(--accent-2)';
+  UI.betBtn.classList.toggle('loan', broke && !rolling);
+  UI.betBtn.textContent = broke && !rolling ? 'TAKE A LOAN · +1,000' : 'ROLL · SPACE';
+  updateChanceLine();
+}
+
+// ------------------------------------------------------------------ history
+function pushHistory(mult, win) {
+  history.unshift({ mult, win });
+  if (history.length > HISTORY_MAX) history.pop();
+  UI.history.innerHTML = history
+    .map(h => `<span class="hist-pill ${h.win ? 'win' : 'loss'}">${h.mult >= 1000 ? fmtInt(h.mult) : h.mult.toFixed(2)}×</span>`)
+    .join('');
+}
+
+// ------------------------------------------------------------------ bankroll chart
+const chartCanvas = document.getElementById('chart');
+const chartCtx = chartCanvas.getContext('2d');
+const chartRange = document.getElementById('chart-range');
+const CHART_MAX = 80;
+const bankHistory = [{ b: balance, w: null }]; // w: true win, false loss, null seed/loan
+
+function pushBank(w) {
+  bankHistory.push({ b: balance, w });
+  if (bankHistory.length > CHART_MAX) bankHistory.shift();
+  drawChart();
+}
+
+function drawChart() {
+  const cw = chartCanvas.clientWidth, ch = chartCanvas.clientHeight;
+  if (!cw || !ch) return;
+  const cdpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (chartCanvas.width !== Math.round(cw * cdpr)) {
+    chartCanvas.width = Math.round(cw * cdpr);
+    chartCanvas.height = Math.round(ch * cdpr);
+  }
+  const g = chartCtx;
+  g.setTransform(cdpr, 0, 0, cdpr, 0, 0);
+  g.clearRect(0, 0, cw, ch);
+
+  const n = bankHistory.length;
+  let lo = Infinity, hi = -Infinity;
+  for (const p of bankHistory) { lo = Math.min(lo, p.b); hi = Math.max(hi, p.b); }
+  if (hi - lo < 1) { hi += 1; lo -= 1; }
+  const pad = (hi - lo) * 0.12;
+  const plo = lo - pad, phi = hi + pad;
+  const X = (i) => 4 + (cw - 8) * (n < 2 ? 1 : i / (n - 1));
+  const Y = (b) => ch - 4 - (ch - 8) * ((b - plo) / (phi - plo));
+
+  // dashed baseline where this window began
+  g.setLineDash([3, 4]);
+  g.strokeStyle = 'rgba(232, 234, 242, 0.18)';
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(0, Y(bankHistory[0].b));
+  g.lineTo(cw, Y(bankHistory[0].b));
+  g.stroke();
+  g.setLineDash([]);
+
+  if (n >= 2) {
+    // soft fill under the line
+    const grad = g.createLinearGradient(0, 0, 0, ch);
+    grad.addColorStop(0, 'rgba(255, 215, 102, 0.16)');
+    grad.addColorStop(1, 'rgba(255, 215, 102, 0)');
+    g.beginPath();
+    g.moveTo(X(0), Y(bankHistory[0].b));
+    for (let i = 1; i < n; i++) g.lineTo(X(i), Y(bankHistory[i].b));
+    g.lineTo(X(n - 1), ch);
+    g.lineTo(X(0), ch);
+    g.closePath();
+    g.fillStyle = grad;
+    g.fill();
+
+    // the tape itself
+    g.beginPath();
+    g.moveTo(X(0), Y(bankHistory[0].b));
+    for (let i = 1; i < n; i++) g.lineTo(X(i), Y(bankHistory[i].b));
+    g.strokeStyle = 'rgba(255, 215, 102, 0.9)';
+    g.lineWidth = 2;
+    g.lineJoin = 'round';
+    g.stroke();
+
+    // win/loss dots on the most recent stretch
+    for (let i = Math.max(1, n - 30); i < n; i++) {
+      const p = bankHistory[i];
+      if (p.w === null) continue;
+      g.beginPath();
+      g.arc(X(i), Y(p.b), 2.5, 0, Math.PI * 2);
+      g.fillStyle = p.w ? '#66ffb2' : '#ff6ec7';
+      g.fill();
+    }
+  }
+  chartRange.textContent = n >= 2 ? `${fmtInt(lo)} – ${fmtInt(hi)}` : 'roll to start the tape';
+}
+
+// ------------------------------------------------------------------ audio (lazy WebAudio)
+let audioCtx = null;
+function initAudio() {
+  if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+}
+function bleep(freq, dur, type = 'triangle', vol = 0.1, delay = 0) {
+  if (!soundOn || !audioCtx || audioCtx.state === 'suspended') return;
+  const t0 = audioCtx.currentTime + delay;
+  const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  gain.gain.setValueAtTime(vol, t0);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t0); osc.stop(t0 + dur);
+}
+function playWin(target) {
+  bleep(660, 0.1); bleep(880, 0.12, 'triangle', 0.1, 0.06);
+  if (target >= 10) { bleep(1320, 0.14, 'triangle', 0.1, 0.12); bleep(1760, 0.25, 'triangle', 0.08, 0.18); }
+}
+function playLoss() { bleep(140, 0.25, 'square', 0.08); bleep(90, 0.3, 'sawtooth', 0.06, 0.06); }
+function playTick(pitch) { bleep(300 + pitch * 500, 0.03, 'square', 0.02); }
+
+// ------------------------------------------------------------------ roll animation
+let animFrom = 1, animResult = 1, animT = 0, animDur = 0, lastTime = 0, tickAcc = 0;
+let pendingSettle = null;
+
+function startRoll(result, onSettle) {
+  rolling = true;
+  animFrom = 1;
+  animResult = result;
+  animT = 0;
+  // longer count-up for bigger numbers; instant in fast mode or under reduced motion
+  animDur = (prefersReducedMotion || fastMode || window.__fastRolls) ? 0 : 0.7 + Math.min(0.9, Math.log10(result) * 0.45);
+  pendingSettle = onSettle;
+  UI.result.className = '';
+  UI.outcome.textContent = '';
+  UI.outcome.className = '';
+  UI.betBtn.disabled = true;
+  if (animDur === 0) settleRoll();
+}
+
+function renderMult(m) {
+  UI.result.innerHTML = `${m >= 1000 ? fmtInt(m) : m.toFixed(2)}<span class="x">×</span>`;
+}
+
+function settleRoll() {
+  renderMult(animResult);
+  rolling = false;
+  UI.betBtn.disabled = false;
+  const settle = pendingSettle;
+  pendingSettle = null;
+  if (settle) settle();
+}
+
+function loop(t) {
+  requestAnimationFrame(loop);
+  const dt = Math.min((t - lastTime) / 1000, 0.1);
+  lastTime = t;
+
+  if (rolling && animDur > 0) {
+    animT += dt;
+    const k = Math.min(1, animT / animDur);
+    const ease = 1 - Math.pow(1 - k, 3);
+    // climb the log scale so million-x rolls don't blur past the readable range
+    const m = Math.exp(Math.log(animFrom) + (Math.log(animResult) - Math.log(animFrom)) * ease);
+    renderMult(Math.min(m, animResult));
+    tickAcc += dt;
+    if (tickAcc > 0.05 && k < 1) { tickAcc = 0; playTick(k); }
+    if (k >= 1) settleRoll();
+  }
+
+  drawBg(dt, t);
+}
+
+// ------------------------------------------------------------------ bet flow
+function placeBet(forcedU) {
+  if (rolling) return;
+  initAudio();
+
+  if (balance < 0.01) { // broke — the button is a loan shark now
+    balance = round2(balance + START_GOLD);
+    streak = 0;
+    updateHud();
+    persist();
+    pushBank(null);
+    bleep(520, 0.12, 'triangle', 0.1); bleep(390, 0.18, 'triangle', 0.08, 0.08);
+    return;
+  }
+
+  const bet = readBet();
+  const target = readTarget();
+  if (!isFinite(bet) || bet > balance) { flashInvalid(UI.bet); return; }
+  if (!isFinite(target)) { flashInvalid(UI.target); return; }
+  UI.bet.value = fmt(bet).replace(/,/g, '');
+  UI.target.value = target.toFixed(2);
+
+  balance = round2(balance - bet);
+  updateHud();
+
+  const result = rollMultiplier(forcedU !== undefined ? forcedU : (debugQueue.length ? debugQueue.shift() : undefined));
+  const win = result >= target;
+
+  startRoll(result, () => {
+    if (win) {
+      balance = round2(balance + bet * target);
+      streak = Math.max(1, streak + 1);
+      const record = target > bigWin;
+      if (record) bigWin = target;
+      UI.result.classList.add('win');
+      UI.outcome.textContent = `WIN +${fmt(round2(bet * (target - 1)))}` +
+        (record && target >= 5 ? ` · NEW TOP HIT ${target.toFixed(2)}×` : '');
+      UI.outcome.className = 'win';
+      playWin(target);
+    } else {
+      streak = Math.min(-1, streak - 1);
+      UI.result.classList.add('loss');
+      UI.outcome.textContent = `BUST −${fmt(bet)}`;
+      UI.outcome.className = 'loss';
+      playLoss();
+    }
+    if (balance > best) best = balance;
+    pushHistory(result, win);
+    pushBank(win);
+    updateHud();
+    persist();
+
+    if (autoOn) stepAuto(win);
+  });
+}
+
+// ------------------------------------------------------------------ auto mode + strategy
+function setAutoStatus(text) { UI.autoStatus.textContent = text; }
+
+function stopAuto(reason = '') {
+  autoOn = false;
+  clearTimeout(autoTimer);
+  UI.autoBtn.classList.remove('on');
+  UI.autoBtn.textContent = 'AUTO';
+  setAutoStatus(reason);
+}
+
+function toggleAuto() {
+  initAudio();
+  if (autoOn) { stopAuto(); return; }
+  const bet = readBet();
+  if (!isFinite(bet) || bet > balance) { flashInvalid(UI.bet); return; }
+  autoBase = autoBet = bet;
+  autoStartBal = balance;
+  autoOn = true;
+  UI.autoBtn.classList.add('on');
+  UI.autoBtn.textContent = 'STOP';
+  setAutoStatus(`Auto · profit +0.00 · bet ${fmt(autoBet)}`);
+  if (!rolling) placeBet();
+}
+
+// after each auto roll: check stop limits, then size the next bet by the strategy
+function stepAuto(win) {
+  const profit = round2(balance - autoStartBal);
+  const sp = parseFloat(UI.stopProfit.value);
+  const sl = parseFloat(UI.stopLoss.value);
+  if (isFinite(sp) && sp > 0 && profit >= sp) {
+    stopAuto(`Auto stopped · profit target hit (+${fmt(profit)})`);
+    return;
+  }
+  if (isFinite(sl) && sl > 0 && -profit >= sl) {
+    stopAuto(`Auto stopped · loss limit hit (${fmt(profit)})`);
+    return;
+  }
+  const mode = win ? strategy.winMode : strategy.lossMode;
+  const pct = win ? strategy.winPct : strategy.lossPct;
+  autoBet = mode === 'reset' ? autoBase : Math.max(0.01, round2(autoBet * (1 + pct / 100)));
+  if (autoBet > balance) {
+    stopAuto(`Auto stopped · bankroll can't cover ${fmt(autoBet)}`);
+    return;
+  }
+  UI.bet.value = autoBet.toFixed(2);
+  updateChanceLine();
+  setAutoStatus(`Auto · profit ${profit >= 0 ? '+' : ''}${fmt(profit)} · bet ${fmt(autoBet)}`);
+  autoTimer = setTimeout(() => { if (autoOn) placeBet(); }, fastMode ? AUTO_DELAY_FAST : AUTO_DELAY);
+}
+
+// auto-betting your fake fortune away while the tab is hidden would be rude
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && autoOn) stopAuto('Auto paused — tab hidden');
+});
+
+// ------------------------------------------------------------------ strategy UI
+function applyStrategyToUI() {
+  UI.lossMode.textContent = strategy.lossMode === 'reset' ? 'Reset' : '± %';
+  UI.winMode.textContent = strategy.winMode === 'reset' ? 'Reset' : '± %';
+  UI.lossMode.classList.toggle('adjust', strategy.lossMode === 'inc');
+  UI.winMode.classList.toggle('adjust', strategy.winMode === 'inc');
+  UI.lossPct.disabled = strategy.lossMode === 'reset';
+  UI.winPct.disabled = strategy.winMode === 'reset';
+  UI.lossPct.value = strategy.lossPct;
+  UI.winPct.value = strategy.winPct;
+  const preset =
+    strategy.lossMode === 'reset' && strategy.winMode === 'reset' ? 'flat' :
+    strategy.lossMode === 'inc' && strategy.lossPct === 100 && strategy.winMode === 'reset' ? 'martingale' :
+    strategy.winMode === 'inc' && strategy.winPct === 100 && strategy.lossMode === 'reset' ? 'paroli' : null;
+  document.querySelectorAll('.strat-preset').forEach(b => b.classList.toggle('active', b.dataset.strat === preset));
+}
+
+document.querySelectorAll('.strat-preset').forEach(b => b.addEventListener('click', () => {
+  initAudio();
+  const s = b.dataset.strat;
+  if (s === 'flat') Object.assign(strategy, { lossMode: 'reset', winMode: 'reset' });
+  if (s === 'martingale') Object.assign(strategy, { lossMode: 'inc', lossPct: 100, winMode: 'reset' });
+  if (s === 'paroli') Object.assign(strategy, { lossMode: 'reset', winMode: 'inc', winPct: 100 });
+  applyStrategyToUI();
+  persist();
+}));
+UI.lossMode.addEventListener('click', () => {
+  strategy.lossMode = strategy.lossMode === 'reset' ? 'inc' : 'reset';
+  applyStrategyToUI(); persist();
+});
+UI.winMode.addEventListener('click', () => {
+  strategy.winMode = strategy.winMode === 'reset' ? 'inc' : 'reset';
+  applyStrategyToUI(); persist();
+});
+UI.lossPct.addEventListener('input', () => {
+  const v = parseFloat(UI.lossPct.value);
+  if (isFinite(v)) strategy.lossPct = Math.max(-99, Math.min(900, v));
+  persist();
+});
+UI.winPct.addEventListener('input', () => {
+  const v = parseFloat(UI.winPct.value);
+  if (isFinite(v)) strategy.winPct = Math.max(-99, Math.min(900, v));
+  persist();
+});
+[UI.stopProfit, UI.stopLoss].forEach(inp => inp.addEventListener('input', persist));
+
+// ------------------------------------------------------------------ fast + sound toggles
+const fastToggle = document.getElementById('fast-toggle');
+const soundToggle = document.getElementById('sound-toggle');
+function updateToggles() {
+  fastToggle.classList.toggle('on', fastMode);
+  soundToggle.classList.toggle('on', soundOn);
+  soundToggle.textContent = soundOn ? '🔊' : '🔇';
+}
+function toggleFast() {
+  fastMode = !fastMode;
+  updateToggles();
+  persist();
+}
+function toggleSound() {
+  soundOn = !soundOn;
+  if (soundOn) { initAudio(); bleep(660, 0.08); } // tiny confirmation blip
+  updateToggles();
+  persist();
+}
+fastToggle.addEventListener('click', toggleFast);
+soundToggle.addEventListener('click', toggleSound);
+
+// ------------------------------------------------------------------ wire up
+UI.betBtn.addEventListener('click', () => placeBet());
+UI.autoBtn.addEventListener('click', toggleAuto);
+document.getElementById('bet-half').addEventListener('click', () => {
+  const b = readBet(); if (isFinite(b)) { UI.bet.value = Math.max(0.01, round2(b / 2)).toFixed(2); updateChanceLine(); }
+});
+document.getElementById('bet-double').addEventListener('click', () => {
+  const b = readBet(); if (isFinite(b)) { UI.bet.value = round2(Math.min(balance, b * 2)).toFixed(2); updateChanceLine(); }
+});
+document.getElementById('bet-max').addEventListener('click', () => {
+  UI.bet.value = round2(balance).toFixed(2); updateChanceLine();
+});
+document.querySelectorAll('.preset').forEach(p => p.addEventListener('click', () => {
+  UI.target.value = parseFloat(p.dataset.target).toFixed(2);
+  document.querySelectorAll('.preset').forEach(q => q.classList.toggle('active', q === p));
+  updateChanceLine();
+}));
+[UI.bet, UI.target].forEach(inp => {
+  inp.addEventListener('input', () => {
+    document.querySelectorAll('.preset').forEach(q => q.classList.remove('active'));
+    updateChanceLine();
+  });
+});
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') {
+    if (e.code === 'Enter') { e.target.blur(); if (e.target === UI.bet || e.target === UI.target) placeBet(); }
+    return;
+  }
+  if (e.target.tagName === 'BUTTON') return; // let a focused button handle Space itself
+  if (e.code === 'Space') { e.preventDefault(); placeBet(); }
+  if (e.code === 'KeyA') toggleAuto();
+  if (e.code === 'KeyF') toggleFast();
+  if (e.code === 'KeyS') toggleSound();
+});
+
+// ------------------------------------------------------------------ background — slow-falling embers
+const canvas = document.getElementById('bg');
+const ctx = canvas.getContext('2d');
+let width, height, dpr, embers = [];
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  width = window.innerWidth; height = window.innerHeight;
+  canvas.width = width * dpr; canvas.height = height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const count = Math.min(70, Math.floor((width * height) / 18000));
+  embers = Array.from({ length: count }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    v: 6 + Math.random() * 14,
+    r: 0.6 + Math.random() * 1.6,
+    hue: Math.random(),
+    tw: Math.random() * Math.PI * 2,
+  }));
+  drawChart();
+}
+window.addEventListener('resize', resize);
+resize();
+
+const EMBER_COLORS = ['124, 108, 255', '70, 200, 255', '255, 110, 199'];
+function drawBg(dt, t) {
+  ctx.clearRect(0, 0, width, height);
+  if (prefersReducedMotion) dt = 0;
+  for (const e of embers) {
+    e.y += e.v * dt;
+    if (e.y > height + 10) { e.y = -10; e.x = Math.random() * width; }
+    const a = (0.25 + 0.2 * Math.sin(e.tw + t / 700)) * 0.9;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${EMBER_COLORS[Math.floor(e.hue * 3)]}, ${a})`;
+    ctx.fill();
+  }
+}
+
+// test hooks, only when opened with #debug in the URL
+if (location.hash.includes('debug')) {
+  window.__debug = {
+    roll: (u) => placeBet(u),   // force the RNG draw: u=0.001 → ~990×, u=0.99 → 1.00×
+    queue: (arr) => { debugQueue = arr.slice(); }, // forced draws consumed by upcoming rolls (auto included)
+    state: () => ({ balance, best, bigWin, streak, rolling, autoOn, autoBet, autoBase, strategy: { ...strategy } }),
+    gold: (n) => { balance = round2(n); updateHud(); persist(); },
+  };
+}
+
+applyStrategyToUI();
+updateToggles();
+updateHud();
+requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>

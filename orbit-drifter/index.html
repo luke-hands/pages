@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Orbit Drifter — Slingshot Space Puzzle</title>
+    <style>
+        :root {
+            --bg: #050711;
+            --fg: #e8eaf2;
+            --muted: #8a90a6;
+            --accent-violet: #7c6cff;
+            --accent-cyan: #46c8ff;
+            --accent-pink: #ff6ec7;
+            --accent-gold: #ffd700;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            height: 100dvh;
+            overflow: hidden;
+            background-color: var(--bg);
+            color: var(--fg);
+            font-family: ui-sans-serif, system-ui, -apple-system, Roboto, sans-serif;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* --- Back to Gallery Floating Button --- */
+        .back-to-gallery {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 99999;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(7, 8, 15, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(232, 234, 242, 0.15);
+            border-radius: 999px;
+            color: #e8eaf2;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            pointer-events: auto;
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        }
+        .back-to-gallery:hover {
+            background: rgba(124, 108, 255, 0.2);
+            border-color: rgba(124, 108, 255, 0.6);
+            color: #ffffff;
+            box-shadow: 0 0 15px rgba(124, 108, 255, 0.5);
+            transform: translateX(-50%) translateY(-1px);
+        }
+        .back-to-gallery:active {
+            transform: translateX(-50%) translateY(1px);
+        }
+        @media (max-width: 768px) {
+            .back-to-gallery {
+                top: 15px;
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+        }
+
+        /* Top HUD */
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px 24px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            z-index: 10;
+        }
+
+        .hud-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .hud-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .hud-val {
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--fg);
+            text-shadow: 0 0 12px rgba(70, 200, 255, 0.3);
+        }
+
+        .hud-val-gold {
+            color: var(--accent-gold);
+            text-shadow: 0 0 12px rgba(255, 215, 0, 0.3);
+        }
+
+        /* Overlays / Modals */
+        .modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(7, 8, 17, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(232, 234, 242, 0.12);
+            border-radius: 24px;
+            padding: 32px 40px;
+            text-align: center;
+            z-index: 100;
+            width: 90%;
+            max-width: 440px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .modal h1 {
+            font-size: 32px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #fff, var(--accent-cyan));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .modal p {
+            font-size: 14px;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--accent-violet), #5b48e6);
+            color: #fff;
+            border: none;
+            padding: 14px 32px;
+            font-size: 16px;
+            font-weight: 700;
+            border-radius: 999px;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(124, 108, 255, 0.4);
+            transition: all 0.2s ease;
+            pointer-events: auto;
+            font-family: inherit;
+            min-width: 180px;
+            min-height: 44px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 30px rgba(124, 108, 255, 0.6);
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        #pause-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 36px;
+            font-weight: 900;
+            letter-spacing: 4px;
+            color: var(--fg);
+            text-shadow: 0 0 20px var(--accent-cyan);
+            pointer-events: none;
+            display: none;
+            z-index: 200;
+        }
+
+        #reset-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10;
+            background: rgba(232, 234, 242, 0.08);
+            border: 1px solid rgba(232, 234, 242, 0.15);
+            color: var(--fg);
+            padding: 10px 18px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            transition: all 0.2s ease;
+            pointer-events: auto;
+        }
+
+        #reset-btn:hover {
+            background: rgba(255, 110, 199, 0.2);
+            border-color: rgba(255, 110, 199, 0.5);
+            color: #fff;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * { animation: none !important; transition: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <a href="../index.html" class="back-to-gallery" aria-label="Back to Gallery">&larr; Back to Gallery</a>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="hud">
+        <div class="hud-group">
+            <span class="hud-title">System Sector</span>
+            <span class="hud-val" id="hud-level">Sector 1</span>
+        </div>
+        <div class="hud-group" style="align-items: center;">
+            <span class="hud-title">Launches</span>
+            <span class="hud-val" id="hud-launches">0</span>
+        </div>
+        <div class="hud-group" style="align-items: flex-end;">
+            <span class="hud-title">Best Score</span>
+            <span class="hud-val hud-val-gold" id="hud-best">--</span>
+        </div>
+    </div>
+
+    <button id="reset-btn">↺ Reset Probe</button>
+
+    <div id="start-modal" class="modal">
+        <h1>ORBIT DRIFTER</h1>
+        <p>
+            Navigate your probe to the target portal using the gravitational pull of planets to slingshot.<br><br>
+            <strong>Controls:</strong> Click & drag from the probe (or anywhere) to set slingshot power and aim direction. Release to launch!
+        </p>
+        <button class="btn" id="start-btn">LAUNCH PROBE</button>
+    </div>
+
+    <div id="game-over-modal" class="modal" style="display: none;">
+        <h1 id="game-over-title">SECTOR CLEAR!</h1>
+        <p id="game-over-desc">You reached the portal in 1 launch.</p>
+        <button class="btn" id="next-sector-btn">NEXT SECTOR</button>
+    </div>
+
+    <div id="pause-indicator">PAUSED</div>
+
+    <script>
+        // --- Constants & Config ---
+        const G_CONSTANT = 18000; // Gravitational strength constant
+        const MAX_AIM_DIST = 160;  // Maximum drag radius for aiming
+        const LAUNCH_POWER_SCALE = 3.2; // Speed multiplier for slingshot launch
+        const PROBE_RADIUS = 7;
+        const PORTAL_RADIUS = 22;
+        const TOUCH_OFFSET_Y = 0; // Natural direct touch targeting
+
+        // --- DOM Elements ---
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const hudLevel = document.getElementById('hud-level');
+        const hudLaunches = document.getElementById('hud-launches');
+        const hudBest = document.getElementById('hud-best');
+        const startModal = document.getElementById('start-modal');
+        const startBtn = document.getElementById('start-btn');
+        const gameOverModal = document.getElementById('game-over-modal');
+        const gameOverTitle = document.getElementById('game-over-title');
+        const gameOverDesc = document.getElementById('game-over-desc');
+        const nextSectorBtn = document.getElementById('next-sector-btn');
+        const pauseIndicator = document.getElementById('pause-indicator');
+        const resetBtn = document.getElementById('reset-btn');
+
+        // --- Game State ---
+        let width = 0, height = 0, dpr = 1;
+        let gameActive = false;
+        let isPaused = false;
+        let sector = 1;
+        let sectorLaunches = 0;
+        let totalLaunches = 0;
+        let bestScore = null; // Fewest launches to complete e.g. 5 sectors or best total
+        let lastTime = 0;
+
+        // Entities
+        let probe = {
+            x: 0, y: 0,
+            startX: 0, startY: 0,
+            vx: 0, vy: 0,
+            radius: PROBE_RADIUS,
+            state: 'aiming', // 'aiming', 'flying', 'crashed', 'portal'
+            trail: []
+        };
+
+        let portal = {
+            x: 0, y: 0,
+            radius: PORTAL_RADIUS,
+            angle: 0
+        };
+
+        let planets = [];
+        let particles = [];
+        let stars = [];
+
+        // Drag / Aim Input State
+        let isDragging = false;
+        let dragStart = { x: 0, y: 0 };
+        let dragCurrent = { x: 0, y: 0 };
+
+        // WebAudio Context
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        // --- LocalStorage Best Score ---
+        function loadBestScore() {
+            try {
+                const stored = localStorage.getItem('orbit-drifter-best');
+                if (stored !== null) {
+                    bestScore = parseInt(stored, 10);
+                    hudBest.textContent = `${bestScore} L`;
+                } else {
+                    hudBest.textContent = '--';
+                }
+            } catch (e) {
+                console.warn('localStorage not accessible', e);
+            }
+        }
+
+        function saveBestScore(score) {
+            try {
+                if (bestScore === null || score < bestScore) {
+                    bestScore = score;
+                    localStorage.setItem('orbit-drifter-best', bestScore.toString());
+                    hudBest.textContent = `${bestScore} L`;
+                }
+            } catch (e) {
+                console.warn('localStorage save failed', e);
+            }
+        }
+
+        // --- Initialization & Resizing ---
+        function resize() {
+            dpr = Math.min(window.devicePixelRatio || 1, 2);
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            initBackgroundStars();
+            if (planets.length === 0) {
+                loadSector(sector);
+            }
+        }
+
+        function initBackgroundStars() {
+            stars = [];
+            const count = Math.floor((width * height) / 7000);
+            for (let i = 0; i < count; i++) {
+                stars.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 1.5 + 0.5,
+                    alpha: Math.random() * 0.6 + 0.2,
+                    twinkleSpeed: Math.random() * 2 + 0.5
+                });
+            }
+        }
+
+        // --- Sector / Procedural Level Generation ---
+        function loadSector(sec) {
+            sector = sec;
+            hudLevel.textContent = `Sector ${sector}`;
+
+            // Reset Probe
+            probe.startX = width * 0.15;
+            probe.startY = height * 0.5;
+            resetProbeToStart();
+
+            // Set Portal Position
+            portal.x = width * 0.85;
+            portal.y = height * (0.3 + (Math.sin(sector * 1.7) * 0.25 + 0.25));
+
+            // Generate Procedural Planets
+            planets = [];
+            const numPlanets = Math.min(1 + Math.floor(sector / 1.5), 4);
+            const marginX = width * 0.25;
+            const availableW = width * 0.45;
+
+            const planetColors = [
+                { main: '#7c6cff', glow: 'rgba(124, 108, 255, 0.4)' },
+                { main: '#46c8ff', glow: 'rgba(70, 200, 255, 0.4)' },
+                { main: '#ff6ec7', glow: 'rgba(255, 110, 199, 0.4)' },
+                { main: '#ffaa33', glow: 'rgba(255, 170, 51, 0.4)' }
+            ];
+
+            for (let i = 0; i < numPlanets; i++) {
+                let pX, pY, radius, mass, overlaps;
+                let attempts = 0;
+
+                do {
+                    overlaps = false;
+                    radius = Math.random() * 25 + 22; // 22px to 47px radius
+                    mass = radius * 35; // Mass proportional to size
+                    pX = marginX + (i + 0.5) * (availableW / numPlanets) + (Math.random() - 0.5) * 60;
+                    pY = height * 0.2 + Math.random() * (height * 0.6);
+
+                    // Avoid placing planet directly on probe or portal
+                    if (Math.hypot(pX - probe.startX, pY - probe.startY) < radius + 80) overlaps = true;
+                    if (Math.hypot(pX - portal.x, pY - portal.y) < radius + 80) overlaps = true;
+
+                    // Avoid overlapping existing planets
+                    for (const existing of planets) {
+                        if (Math.hypot(pX - existing.x, pY - existing.y) < radius + existing.radius + 50) {
+                            overlaps = true;
+                            break;
+                        }
+                    }
+                    attempts++;
+                } while (overlaps && attempts < 100);
+
+                planets.push({
+                    x: pX,
+                    y: pY,
+                    radius: radius,
+                    mass: mass,
+                    color: planetColors[i % planetColors.length],
+                    pulse: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        function resetProbeToStart() {
+            probe.x = probe.startX;
+            probe.y = probe.startY;
+            probe.vx = 0;
+            probe.vy = 0;
+            probe.state = 'aiming';
+            probe.trail = [];
+            isDragging = false;
+        }
+
+        // --- Physics Engine ---
+        function updatePhysics(dt) {
+            if (probe.state !== 'flying') return;
+
+            // Substepping for high accuracy and no tunneling
+            const substeps = 10;
+            const subDt = dt / substeps;
+
+            for (let s = 0; s < substeps; s++) {
+                if (probe.state !== 'flying') break;
+
+                let totalAx = 0;
+                let totalAy = 0;
+
+                // Calculate gravitational forces from all planets
+                for (const planet of planets) {
+                    const dx = planet.x - probe.x;
+                    const dy = planet.y - probe.y;
+                    const distSq = dx * dx + dy * dy;
+                    const dist = Math.sqrt(distSq);
+
+                    // Check Planet Collision
+                    if (dist < probe.radius + planet.radius) {
+                        handleCrash(planet);
+                        break;
+                    }
+
+                    // Gravity acceleration: a = G * mass / (dist^2 + softening)
+                    const softening = 400; // prevents infinite forces at near distances
+                    const accel = (G_CONSTANT * planet.mass) / (distSq + softening);
+                    totalAx += (dx / dist) * accel;
+                    totalAy += (dy / dist) * accel;
+                }
+
+                if (probe.state !== 'flying') break;
+
+                // Velocity Verlet / Euler substep integration
+                probe.vx += totalAx * subDt;
+                probe.vy += totalAy * subDt;
+                probe.x += probe.vx * subDt;
+                probe.y += probe.vy * subDt;
+
+                // Check Portal Collision
+                const portalDist = Math.hypot(portal.x - probe.x, portal.y - probe.y);
+                if (portalDist < probe.radius + portal.radius) {
+                    handlePortalSuccess();
+                    break;
+                }
+
+                // Check Out-of-bounds boundary
+                const boundaryMargin = 250;
+                if (probe.x < -boundaryMargin || probe.x > width + boundaryMargin ||
+                    probe.y < -boundaryMargin || probe.y > height + boundaryMargin) {
+                    handleOutOfBounds();
+                    break;
+                }
+            }
+
+            // Update trail
+            if (probe.state === 'flying') {
+                probe.trail.push({ x: probe.x, y: probe.y });
+                if (probe.trail.length > 45) {
+                    probe.trail.shift();
+                }
+            }
+        }
+
+        function handleCrash(planet) {
+            probe.state = 'crashed';
+            createExplosion(probe.x, probe.y, planet.color.main);
+            playCrashSound();
+            setTimeout(() => {
+                if (gameActive) resetProbeToStart();
+            }, 600);
+        }
+
+        function handleOutOfBounds() {
+            probe.state = 'crashed';
+            createExplosion(probe.x, probe.y, '#8a90a6');
+            playCrashSound();
+            setTimeout(() => {
+                if (gameActive) resetProbeToStart();
+            }, 500);
+        }
+
+        function handlePortalSuccess() {
+            probe.state = 'portal';
+            createPortalBurst(portal.x, portal.y);
+            playPortalSound();
+
+            setTimeout(() => {
+                showSectorClearModal();
+            }, 700);
+        }
+
+        // --- Trajectory Prediction Line ---
+        function calculateTrajectoryPoints() {
+            if (!isDragging || probe.state !== 'aiming') return [];
+
+            // Calculate launch velocity vector from slingshot drag
+            const pullDx = dragStart.x - dragCurrent.x;
+            const pullDy = dragStart.y - dragCurrent.y;
+            const pullDist = Math.min(Math.hypot(pullDx, pullDy), MAX_AIM_DIST);
+
+            if (pullDist < 5) return [];
+
+            const angle = Math.atan2(pullDy, pullDx);
+            const launchSpeed = pullDist * LAUNCH_POWER_SCALE;
+
+            let simX = probe.startX;
+            let simY = probe.startY;
+            let simVx = Math.cos(angle) * launchSpeed;
+            let simVy = Math.sin(angle) * launchSpeed;
+
+            const points = [{ x: simX, y: simY }];
+            const simSteps = 220;
+            const simSubDt = 0.016 / 4; // 4 substeps per step
+
+            for (let step = 0; step < simSteps; step++) {
+                for (let s = 0; s < 4; s++) {
+                    let ax = 0, ay = 0;
+                    for (const planet of planets) {
+                        const dx = planet.x - simX;
+                        const dy = planet.y - simY;
+                        const distSq = dx * dx + dy * dy;
+                        const dist = Math.sqrt(distSq);
+
+                        if (dist < PROBE_RADIUS + planet.radius) {
+                            points.push({ x: simX, y: simY, hit: true });
+                            return points;
+                        }
+
+                        const accel = (G_CONSTANT * planet.mass) / (distSq + 400);
+                        ax += (dx / dist) * accel;
+                        ay += (dy / dist) * accel;
+                    }
+
+                    simVx += ax * simSubDt;
+                    simVy += ay * simSubDt;
+                    simX += simVx * simSubDt;
+                    simY += simVy * simSubDt;
+                }
+
+                if (step % 2 === 0) {
+                    points.push({ x: simX, y: simY });
+                }
+
+                // Portal hit check in simulation
+                if (Math.hypot(portal.x - simX, portal.y - simY) < PORTAL_RADIUS) {
+                    points.push({ x: simX, y: simY, portalHit: true });
+                    return points;
+                }
+            }
+
+            return points;
+        }
+
+        // --- Particles & FX ---
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 24; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 180 + 40;
+                particles.push({
+                    x: x, y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    radius: Math.random() * 3 + 1.5,
+                    color: color,
+                    alpha: 1,
+                    life: 0.6 + Math.random() * 0.4
+                });
+            }
+        }
+
+        function createPortalBurst(x, y) {
+            for (let i = 0; i < 36; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 220 + 80;
+                particles.push({
+                    x: x, y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    radius: Math.random() * 4 + 2,
+                    color: '#46c8ff',
+                    alpha: 1,
+                    life: 0.8 + Math.random() * 0.4
+                });
+            }
+        }
+
+        function updateParticles(dt) {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.life -= dt;
+                p.alpha = Math.max(0, p.life);
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- Sound Effects (WebAudio Synth) ---
+        function playLaunchSound(powerRatio) {
+            if (!audioCtx) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(180 + powerRatio * 200, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(400 + powerRatio * 400, audioCtx.currentTime + 0.2);
+
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.2);
+            } catch (e) {}
+        }
+
+        function playCrashSound() {
+            if (!audioCtx) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.3);
+
+                gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            } catch (e) {}
+        }
+
+        function playPortalSound() {
+            if (!audioCtx) return;
+            try {
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.4);
+
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(now + 0.5);
+            } catch (e) {}
+        }
+
+        // --- Rendering ---
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw Stars
+            for (const s of stars) {
+                ctx.fillStyle = `rgba(232, 234, 242, ${s.alpha})`;
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Draw Planets
+            for (const planet of planets) {
+                planet.pulse += 0.02;
+                const pulseGlow = Math.sin(planet.pulse) * 4 + planet.radius * 0.3;
+
+                // Atmosphere / Gravity Glow
+                const grad = ctx.createRadialGradient(
+                    planet.x, planet.y, planet.radius * 0.8,
+                    planet.x, planet.y, planet.radius + pulseGlow + 15
+                );
+                grad.addColorStop(0, planet.color.glow);
+                grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(planet.x, planet.y, planet.radius + pulseGlow + 15, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Planet Body
+                ctx.fillStyle = planet.color.main;
+                ctx.shadowColor = planet.color.main;
+                ctx.shadowBlur = 12;
+                ctx.beginPath();
+                ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+
+            // Draw Portal
+            portal.angle += 0.03;
+            ctx.save();
+            ctx.translate(portal.x, portal.y);
+
+            // Outer portal ring
+            ctx.strokeStyle = '#46c8ff';
+            ctx.shadowColor = '#46c8ff';
+            ctx.shadowBlur = 15;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(0, 0, portal.radius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Inner rotating swirl pattern
+            ctx.rotate(portal.angle);
+            ctx.strokeStyle = '#ff6ec7';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                ctx.arc(0, 0, portal.radius * 0.6, i * (Math.PI * 2 / 3), i * (Math.PI * 2 / 3) + Math.PI / 2);
+                ctx.stroke();
+            }
+            ctx.restore();
+            ctx.shadowBlur = 0;
+
+            // Draw Trajectory Line if aiming
+            if (isDragging && probe.state === 'aiming') {
+                const trajectory = calculateTrajectoryPoints();
+                if (trajectory.length > 1) {
+                    ctx.save();
+                    ctx.setLineDash([4, 6]);
+                    ctx.strokeStyle = 'rgba(70, 200, 255, 0.7)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(trajectory[0].x, trajectory[0].y);
+                    for (let i = 1; i < trajectory.length; i++) {
+                        ctx.lineTo(trajectory[i].x, trajectory[i].y);
+                    }
+                    ctx.stroke();
+
+                    // Endpoint marker
+                    const lastPt = trajectory[trajectory.length - 1];
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = lastPt.hit ? '#ff6ec7' : '#46c8ff';
+                    ctx.beginPath();
+                    ctx.arc(lastPt.x, lastPt.y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                // Draw Slingshot Band / Pull Indicator
+                ctx.save();
+                ctx.strokeStyle = 'rgba(124, 108, 255, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(probe.startX, probe.startY);
+                ctx.lineTo(dragCurrent.x, dragCurrent.y);
+                ctx.stroke();
+
+                ctx.fillStyle = '#7c6cff';
+                ctx.beginPath();
+                ctx.arc(dragCurrent.x, dragCurrent.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Draw Probe Trail
+            if (probe.trail.length > 1) {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(70, 200, 255, 0.4)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(probe.trail[0].x, probe.trail[0].y);
+                for (let i = 1; i < probe.trail.length; i++) {
+                    ctx.lineTo(probe.trail[i].x, probe.trail[i].y);
+                }
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // Draw Probe
+            if (probe.state !== 'crashed') {
+                ctx.save();
+                ctx.fillStyle = '#ffffff';
+                ctx.shadowColor = '#46c8ff';
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                ctx.arc(probe.x, probe.y, probe.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Draw Particles
+            for (const p of particles) {
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // --- Controls & Input Handlers ---
+        function handlePointerDown(e) {
+            if (!gameActive || probe.state !== 'aiming') return;
+            initAudio();
+
+            const rect = canvas.getBoundingClientRect();
+            const px = e.clientX - rect.left;
+            const py = e.clientY - rect.top;
+
+            isDragging = true;
+            dragStart = { x: probe.startX, y: probe.startY };
+            dragCurrent = { x: px, y: py };
+        }
+
+        function handlePointerMove(e) {
+            if (!isDragging || probe.state !== 'aiming') return;
+
+            const rect = canvas.getBoundingClientRect();
+            const px = e.clientX - rect.left;
+            const py = e.clientY - rect.top;
+
+            // Clamp drag distance to MAX_AIM_DIST
+            const dx = px - dragStart.x;
+            const dy = py - dragStart.y;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist > MAX_AIM_DIST) {
+                const angle = Math.atan2(dy, dx);
+                dragCurrent = {
+                    x: dragStart.x + Math.cos(angle) * MAX_AIM_DIST,
+                    y: dragStart.y + Math.sin(angle) * MAX_AIM_DIST
+                };
+            } else {
+                dragCurrent = { x: px, y: py };
+            }
+        }
+
+        function handlePointerUp() {
+            if (!isDragging || probe.state !== 'aiming') return;
+            isDragging = false;
+
+            const pullDx = dragStart.x - dragCurrent.x;
+            const pullDy = dragStart.y - dragCurrent.y;
+            const pullDist = Math.hypot(pullDx, pullDy);
+
+            if (pullDist > 10) {
+                const angle = Math.atan2(pullDy, pullDx);
+                const speed = Math.min(pullDist, MAX_AIM_DIST) * LAUNCH_POWER_SCALE;
+
+                probe.vx = Math.cos(angle) * speed;
+                probe.vy = Math.sin(angle) * speed;
+                probe.state = 'flying';
+
+                sectorLaunches++;
+                totalLaunches++;
+                hudLaunches.textContent = `${totalLaunches}`;
+
+                playLaunchSound(pullDist / MAX_AIM_DIST);
+            }
+        }
+
+        // Event Listeners
+        window.addEventListener('pointerdown', handlePointerDown);
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', () => { isDragging = false; });
+
+        resetBtn.addEventListener('click', () => {
+            if (gameActive && probe.state === 'flying') {
+                resetProbeToStart();
+            }
+        });
+
+        // --- Game Flow & Loop ---
+        function showSectorClearModal() {
+            gameOverTitle.textContent = `SECTOR ${sector} CLEAR!`;
+            gameOverDesc.innerHTML = `Sector completed in <strong>${sectorLaunches}</strong> ${sectorLaunches === 1 ? 'launch' : 'launches'}.<br>Total Launches: <strong>${totalLaunches}</strong>`;
+            gameOverModal.style.display = 'flex';
+        }
+
+        function startGame() {
+            sector = 1;
+            totalLaunches = 0;
+            sectorLaunches = 0;
+            hudLaunches.textContent = '0';
+            gameActive = true;
+            startModal.style.display = 'none';
+            gameOverModal.style.display = 'none';
+            loadSector(sector);
+        }
+
+        function nextSector() {
+            sectorLaunches = 0;
+            sector++;
+            gameOverModal.style.display = 'none';
+            loadSector(sector);
+            if (sector > 5) {
+                saveBestScore(totalLaunches);
+            }
+        }
+
+        startBtn.addEventListener('click', startGame);
+        nextSectorBtn.addEventListener('click', nextSector);
+
+        // Visibility Change Handler
+        document.addEventListener('visibilitychange', () => {
+            isPaused = document.hidden;
+            if (pauseIndicator) {
+                pauseIndicator.style.display = isPaused ? 'block' : 'none';
+            }
+            if (!isPaused) {
+                lastTime = performance.now();
+            }
+        });
+
+        // Main Loop
+        function loop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+            lastTime = timestamp;
+
+            if (gameActive && !isPaused) {
+                updatePhysics(dt);
+                updateParticles(dt);
+            }
+
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        window.addEventListener('resize', resize);
+        loadBestScore();
+        resize();
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html>

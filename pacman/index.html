@@ -364,7 +364,12 @@
   let score = 0;
   let lives = 3;
   let level = 1;
-  let bestScore = parseInt(localStorage.getItem('pacman-best'), 10) || 0;
+  let bestScore = 0;
+  try {
+    bestScore = parseInt(localStorage.getItem('pacman-best'), 10) || 0;
+  } catch(e) {
+    bestScore = 0;
+  }
 
   let gameActive = false;
   let gameState = 'START'; // START, PLAYING, DYING, LEVEL_CLEAR, GAME_OVER
@@ -542,9 +547,10 @@
   }
 
   // --- Tile & Collision Helpers ---
-  function isWall(col, row, isGhost = false, mode = 'OUT') {
-    // Tunnel wrap handling
-    if (row === 14 && (col < 0 || col >= COLS)) return false;
+  const TUNNEL_ROW = 14;
+
+  function isTileWall(col, row, isGhost = false, mode = 'OUT') {
+    if (row === TUNNEL_ROW && (col < 0 || col >= COLS)) return false;
     if (row < 0 || row >= ROWS || col < 0 || col >= COLS) return true;
 
     const tile = map[row][col];
@@ -558,26 +564,20 @@
     return false;
   }
 
-  function canMoveTo(x, y, dir, isGhost = false, mode = 'OUT') {
-    const nextX = x + dir.x * 0.45;
-    const nextY = y + dir.y * 0.45;
+  function canMoveInDir(x, y, dir, isGhost = false, mode = 'OUT') {
+    if (!dir || dir === DIR_NONE) return true;
 
-    const col1 = Math.floor(nextX - 0.4);
-    const col2 = Math.floor(nextX + 0.4);
-    const row1 = Math.floor(nextY - 0.4);
-    const row2 = Math.floor(nextY + 0.4);
+    if (dir.x !== 0) {
+      const row = Math.round(y);
+      const targetCol = dir.x < 0 ? Math.floor(x - 0.45) : Math.floor(x + 0.45);
+      return !isTileWall(targetCol, row, isGhost, mode);
+    } else if (dir.y !== 0) {
+      const col = Math.round(x);
+      const targetRow = dir.y < 0 ? Math.floor(y - 0.45) : Math.floor(y + 0.45);
+      return !isTileWall(col, targetRow, isGhost, mode);
+    }
 
-    return !isWall(col1, row1, isGhost, mode) &&
-           !isWall(col2, row1, isGhost, mode) &&
-           !isWall(col1, row2, isGhost, mode) &&
-           !isWall(col2, row2, isGhost, mode);
-  }
-
-  function isAtIntersection(x, y) {
-    const tileX = Math.round(x);
-    const tileY = Math.round(y);
-    const dist = Math.hypot(x - tileX, y - tileY);
-    return dist < 0.15;
+    return true;
   }
 
   // --- Input Handlers ---
@@ -656,21 +656,28 @@
   }
 
   function updatePacman(dt) {
-    // Direction change buffering at alignment
+    // Direction change / turning logic
     if (pacman.nextDir !== pacman.dir) {
-      if (canMoveTo(pacman.x, pacman.y, pacman.nextDir)) {
-        // Snap to grid lane when changing perp direction
-        if (pacman.nextDir.x !== 0 && pacman.dir.y !== 0) {
-          pacman.y = Math.round(pacman.y);
-        } else if (pacman.nextDir.y !== 0 && pacman.dir.x !== 0) {
-          pacman.x = Math.round(pacman.x);
-        }
+      // Reverse direction immediately
+      if (pacman.nextDir.x === -pacman.dir.x && pacman.nextDir.y === -pacman.dir.y) {
         pacman.dir = pacman.nextDir;
+      } else {
+        // Turning perpendicular: check turning window around tile center
+        const alignDist = pacman.dir.x !== 0 ? Math.abs(pacman.x - Math.round(pacman.x)) : Math.abs(pacman.y - Math.round(pacman.y));
+        if (alignDist < 0.45) {
+          const testX = pacman.dir.x !== 0 ? Math.round(pacman.x) : pacman.x;
+          const testY = pacman.dir.y !== 0 ? Math.round(pacman.y) : pacman.y;
+          if (canMoveInDir(testX, testY, pacman.nextDir)) {
+            pacman.x = testX;
+            pacman.y = testY;
+            pacman.dir = pacman.nextDir;
+          }
+        }
       }
     }
 
-    // Move Pacman
-    if (canMoveTo(pacman.x, pacman.y, pacman.dir)) {
+    // Forward Movement
+    if (canMoveInDir(pacman.x, pacman.y, pacman.dir)) {
       pacman.x += pacman.dir.x * pacman.speed * dt;
       pacman.y += pacman.dir.y * pacman.speed * dt;
 
@@ -683,13 +690,13 @@
         if (pacman.mouthAngle <= 0.05) pacman.mouthOpening = true;
       }
     } else {
-      // Snap to tile center when hit wall
+      // Snap to tile center on wall collision
       if (pacman.dir.x !== 0) pacman.x = Math.round(pacman.x);
       if (pacman.dir.y !== 0) pacman.y = Math.round(pacman.y);
       pacman.mouthAngle = 0.2;
     }
 
-    // Tunnel Wrap
+    // Continuous Tunnel Wrap-around
     if (pacman.x < -0.5) pacman.x = COLS - 0.5;
     if (pacman.x >= COLS - 0.5) pacman.x = -0.5;
 
@@ -716,7 +723,9 @@
 
       if (score > bestScore) {
         bestScore = score;
-        localStorage.setItem('pacman-best', bestScore);
+        try {
+          localStorage.setItem('pacman-best', bestScore);
+        } catch(e) {}
       }
 
       // Check Level Clear
@@ -815,6 +824,8 @@
           ghost.y = 11;
           ghost.mode = 'OUT';
           ghost.dir = DIR_LEFT;
+          ghost.lastTileX = 13;
+          ghost.lastTileY = 11;
         }
         return;
       }
@@ -833,45 +844,57 @@
       if (ghost.mode === 'FRIGHTENED') curSpeed *= 0.6;
       if (ghost.mode === 'EATEN') curSpeed *= 2.0;
 
+      // Slow down in side tunnels (classic Pacman mechanic)
+      if (Math.round(ghost.y) === TUNNEL_ROW && (ghost.x < 5 || ghost.x >= COLS - 5)) {
+        curSpeed *= 0.5;
+      }
+
       // Move ghost
       ghost.x += ghost.dir.x * curSpeed * dt;
       ghost.y += ghost.dir.y * curSpeed * dt;
 
-      // Wrap-around tunnel
+      // Continuous Wrap-around tunnel
       if (ghost.x < -0.5) ghost.x = COLS - 0.5;
       if (ghost.x >= COLS - 0.5) ghost.x = -0.5;
 
-      // Check intersections for AI decision making
-      if (isAtIntersection(ghost.x, ghost.y)) {
-        ghost.x = Math.round(ghost.x);
-        ghost.y = Math.round(ghost.y);
+      // Check intersections when ghost enters new tile center
+      const tileX = Math.round(ghost.x);
+      const tileY = Math.round(ghost.y);
 
-        const target = getGhostTarget(ghost);
-        const possibleDirs = [DIR_UP, DIR_LEFT, DIR_DOWN, DIR_RIGHT].filter(d => {
-          // Prevent ghost 180 reversing unless required
-          if (d.x === -ghost.dir.x && d.y === -ghost.dir.y) return false;
-          return canMoveTo(ghost.x, ghost.y, d, true, ghost.mode);
-        });
+      if (tileX !== ghost.lastTileX || tileY !== ghost.lastTileY) {
+        if (Math.hypot(ghost.x - tileX, ghost.y - tileY) < 0.2) {
+          ghost.lastTileX = tileX;
+          ghost.lastTileY = tileY;
 
-        if (possibleDirs.length > 0) {
-          // Choose direction that minimizes distance to target
-          let bestDir = possibleDirs[0];
-          let minDist = Infinity;
-
-          possibleDirs.forEach(d => {
-            const nextTileX = ghost.x + d.x;
-            const nextTileY = ghost.y + d.y;
-            const dist = Math.hypot(nextTileX - target.x, nextTileY - target.y);
-            if (dist < minDist) {
-              minDist = dist;
-              bestDir = d;
-            }
+          const target = getGhostTarget(ghost);
+          const candidateDirs = [DIR_UP, DIR_LEFT, DIR_DOWN, DIR_RIGHT].filter(d => {
+            // Prevent 180 reverse turns unless stuck
+            if (d.x === -ghost.dir.x && d.y === -ghost.dir.y) return false;
+            return canMoveInDir(tileX, tileY, d, true, ghost.mode);
           });
 
-          ghost.dir = bestDir;
-        } else if (!canMoveTo(ghost.x, ghost.y, ghost.dir, true, ghost.mode)) {
-          // Reverse if stuck
-          ghost.dir = { x: -ghost.dir.x, y: -ghost.dir.y };
+          if (candidateDirs.length > 0) {
+            let bestDir = candidateDirs[0];
+            if (ghost.mode === 'FRIGHTENED') {
+              bestDir = candidateDirs[Math.floor(Math.random() * candidateDirs.length)];
+            } else {
+              let minDist = Infinity;
+              candidateDirs.forEach(d => {
+                const nextTileX = tileX + d.x;
+                const nextTileY = tileY + d.y;
+                const dist = Math.hypot(nextTileX - target.x, nextTileY - target.y);
+                if (dist < minDist) {
+                  minDist = dist;
+                  bestDir = d;
+                }
+              });
+            }
+            ghost.dir = bestDir;
+            if (bestDir.x !== 0) ghost.y = tileY;
+            if (bestDir.y !== 0) ghost.x = tileX;
+          } else if (!canMoveInDir(ghost.x, ghost.y, ghost.dir, true, ghost.mode)) {
+            ghost.dir = { x: -ghost.dir.x, y: -ghost.dir.y, name: 'reverse' };
+          }
         }
       }
     });
@@ -975,11 +998,9 @@
     }
   }
 
-  function drawPacman() {
-    if (gameState === 'DYING') return;
-
-    const px = pacman.x * tileSize;
-    const py = (pacman.y + 1.2) * tileSize;
+  function drawPacmanEntityAt(x, y) {
+    const px = x * tileSize;
+    const py = (y + 1.2) * tileSize;
     const radius = tileSize * 0.65;
 
     let baseAngle = 0;
@@ -998,6 +1019,17 @@
     ctx.fill();
   }
 
+  function drawPacman() {
+    if (gameState === 'DYING') return;
+
+    drawPacmanEntityAt(pacman.x, pacman.y);
+    if (pacman.x < 1) {
+      drawPacmanEntityAt(pacman.x + COLS, pacman.y);
+    } else if (pacman.x > COLS - 2) {
+      drawPacmanEntityAt(pacman.x - COLS, pacman.y);
+    }
+  }
+
   function drawDyingPacman() {
     const px = pacman.x * tileSize;
     const py = (pacman.y + 1.2) * tileSize;
@@ -1012,57 +1044,60 @@
     ctx.fill();
   }
 
-  function drawGhosts() {
-    ghosts.forEach(ghost => {
-      const gx = ghost.x * tileSize;
-      const gy = (ghost.y + 1.2) * tileSize;
-      const radius = tileSize * 0.6;
+  function drawSingleGhost(ghost, x, y) {
+    const gx = x * tileSize;
+    const gy = (y + 1.2) * tileSize;
+    const radius = tileSize * 0.6;
 
-      ctx.save();
-      ctx.translate(gx, gy);
+    ctx.save();
+    ctx.translate(gx, gy);
 
-      if (ghost.mode === 'EATEN') {
-        // Draw Eyes Only returning to base
-        drawGhostEyes(ghost.dir);
+    if (ghost.mode === 'EATEN') {
+      drawGhostEyes(ghost.dir);
+    } else {
+      if (ghost.mode === 'FRIGHTENED') {
+        const isFlashing = frightenedTimer < 2.0 && Math.floor(Date.now() / 150) % 2 === 0;
+        ctx.fillStyle = isFlashing ? '#ffffff' : '#2121ff';
       } else {
-        // Draw Ghost Body
-        if (ghost.mode === 'FRIGHTENED') {
-          const isFlashing = frightenedTimer < 2.0 && Math.floor(Date.now() / 150) % 2 === 0;
-          ctx.fillStyle = isFlashing ? '#ffffff' : '#2121ff';
-        } else {
-          ctx.fillStyle = ghost.color;
-        }
-
-        // Dome Head and Skirt
-        ctx.beginPath();
-        ctx.arc(0, -radius * 0.2, radius, Math.PI, 0, false);
-        ctx.lineTo(radius, radius);
-
-        // Wavy bottom skirt
-        const waveCount = 3;
-        const waveWidth = (radius * 2) / waveCount;
-        for (let i = 0; i < waveCount; i++) {
-          const x = radius - (i + 0.5) * waveWidth;
-          const y = radius - (i % 2 === 0 ? radius * 0.3 : 0);
-          ctx.quadraticCurveTo(x, y, radius - (i + 1) * waveWidth, radius);
-        }
-        ctx.closePath();
-        ctx.fill();
-
-        // Eyes
-        if (ghost.mode !== 'FRIGHTENED') {
-          drawGhostEyes(ghost.dir);
-        } else {
-          // Frightened face expression
-          ctx.fillStyle = '#ffb8ae';
-          ctx.beginPath();
-          ctx.arc(-radius * 0.3, -radius * 0.2, radius * 0.15, 0, Math.PI * 2);
-          ctx.arc(radius * 0.3, -radius * 0.2, radius * 0.15, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        ctx.fillStyle = ghost.color;
       }
 
-      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(0, -radius * 0.2, radius, Math.PI, 0, false);
+      ctx.lineTo(radius, radius);
+
+      const waveCount = 3;
+      const waveWidth = (radius * 2) / waveCount;
+      for (let i = 0; i < waveCount; i++) {
+        const wx = radius - (i + 0.5) * waveWidth;
+        const wy = radius - (i % 2 === 0 ? radius * 0.3 : 0);
+        ctx.quadraticCurveTo(wx, wy, radius - (i + 1) * waveWidth, radius);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      if (ghost.mode !== 'FRIGHTENED') {
+        drawGhostEyes(ghost.dir);
+      } else {
+        ctx.fillStyle = '#ffb8ae';
+        ctx.beginPath();
+        ctx.arc(-radius * 0.3, -radius * 0.2, radius * 0.15, 0, Math.PI * 2);
+        ctx.arc(radius * 0.3, -radius * 0.2, radius * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function drawGhosts() {
+    ghosts.forEach(ghost => {
+      drawSingleGhost(ghost, ghost.x, ghost.y);
+      if (ghost.x < 1) {
+        drawSingleGhost(ghost, ghost.x + COLS, ghost.y);
+      } else if (ghost.x > COLS - 2) {
+        drawSingleGhost(ghost, ghost.x - COLS, ghost.y);
+      }
     });
   }
 

@@ -3,7 +3,7 @@
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Live%20Gallery-blueviolet?style=for-the-badge&logo=github)](https://luke-hands.github.io/pages/)
 [![Zero Build](https://img.shields.io/badge/Build-Zero%20Dependencies%20%2F%20Vanilla%20JS-brightgreen?style=for-the-badge)](https://github.com/luke-hands/pages)
 
-Welcome to **Luke Hands — Gallery**, a curated collection of 14 self-contained HTML5 browser games, physics simulations, and web toys. Each project is designed to run directly in the browser with zero build steps, framework dependencies, or installation required.
+Welcome to **Luke Hands — Gallery**, a curated collection of 15 self-contained HTML5 browser games, physics simulations, and web toys. Each project is designed to run directly in the browser with zero build steps, framework dependencies, or installation required.
 
 Visit the live gallery at **[luke-hands.github.io/pages/](https://luke-hands.github.io/pages/)**.
 
@@ -108,6 +108,16 @@ The root gallery (`index.html`) serves as an interactive glassmorphic arcade das
 * **Controls**: Drag `Mouse` / `Touch` to draw barriers; click UI buttons to clear canvas or toggle emitter nodes.
 * **Technologies**: Canvas 2D particle & collision physics, Web Audio harmonic tones.
 * **Storage**: `neonScrawlBest`
+
+---
+
+### 🟡 Pac-Man
+* **Folder**: [`/pacman/`](./pacman/)
+* **Tags**: `Retro`, `Action`
+* **Description**: Faithfully recreated classic arcade maze chase. Guide Pac-Man through the labyrinth, munching dots and power pellets while evading four distinct ghost AI behaviors (Blinky, Pinky, Inky, Clyde).
+* **Controls**: `Arrow Keys` / `WASD` / Touch D-Pad or Swipe gestures to buffer turns.
+* **Technologies**: HTML5 Canvas 2D, Web Audio API, Grid-based AI Pathfinding & Direction Buffering.
+* **Storage**: `pacman-best`
 
 ---
 

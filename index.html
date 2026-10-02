@@ -397,7 +397,7 @@
 <!-- Player Profile / Stats Dashboard -->
 <div class="stats-dashboard" id="stats-dashboard">
   <div class="stats-card">
-    <div class="stats-val" id="stats-played">0 / 15</div>
+    <div class="stats-val" id="stats-played">0 / 16</div>
     <div class="stats-lbl">Games Played</div>
   </div>
   <div class="stats-card">
@@ -434,6 +434,18 @@
     <div class="card-footer">
       <div class="card-tags">
         <span class="card-tag">Zen</span>
+      </div>
+      <div class="score-badge-container"></div>
+    </div>
+  </a>
+
+  <a href="./pacman/" class="card" data-tags="retro action" data-game-id="pacman">
+    <h2>Pac-Man</h2>
+    <p>Classic arcade maze chase — navigate Pac-Man through the maze eating dots while dodging Blinky, Pinky, Inky, and Clyde.</p>
+    <div class="card-footer">
+      <div class="card-tags">
+        <span class="card-tag">Retro</span>
+        <span class="card-tag">Action</span>
       </div>
       <div class="score-badge-container"></div>
     </div>
@@ -627,6 +639,7 @@
     'loop-serpent': { key: 'loop-serpent-best' },
     'neon-scrawl': { key: 'neonScrawlBest' },
     'orbit-drifter': { key: 'orbit-drifter-best' },
+    'pacman': { key: 'pacman-best' },
     'plunder-run': { key: 'plunder-run-best', alts: ['plunder-run-best-easy', 'plunder-run-best-medium', 'plunder-run-best-hard'] },
     'pulsar': { key: 'pulsar-best' },
     'singularity-command': { key: 'singularity_best' },
@@ -694,7 +707,7 @@
     }
 
     // Update Dashboard UI
-    document.getElementById('stats-played').textContent = `${playedCount} / 15`;
+    document.getElementById('stats-played').textContent = `${playedCount} / 16`;
     document.getElementById('stats-total-score').textContent = totalScorePoints.toLocaleString();
     document.getElementById('stats-rank').textContent = rank;
   }

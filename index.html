@@ -397,7 +397,7 @@
 <!-- Player Profile / Stats Dashboard -->
 <div class="stats-dashboard" id="stats-dashboard">
   <div class="stats-card">
-    <div class="stats-val" id="stats-played">0 / 16</div>
+    <div class="stats-val" id="stats-played">0 / 17</div>
     <div class="stats-lbl">Games Played</div>
   </div>
   <div class="stats-card">
@@ -428,6 +428,18 @@
 </div>
 
 <main id="games-grid">
+  <a href="./mortar-spotter/" class="card" data-tags="action physics" data-game-id="mortar-spotter">
+    <h2>Mortar Spotter 3D</h2>
+    <p>Combined-arms 3D artillery &amp; recon RTS — spot through raycasted fog of war with tanks and binocular crews, dodge radar-guided SAMs, and shell hostile batteries.</p>
+    <div class="card-footer">
+      <div class="card-tags">
+        <span class="card-tag">Action</span>
+        <span class="card-tag">Physics</span>
+      </div>
+      <div class="score-badge-container"></div>
+    </div>
+  </a>
+
   <a href="./ai-space/" class="card" data-tags="zen" data-game-id="ai-space">
     <h2>AI Space Interface</h2>
     <p>A futuristic glassmorphic command center with neural link mockups and hidden telemetry.</p>
@@ -637,6 +649,7 @@
     'last-parry': { key: 'last-parry-best' },
     'limbo': { key: 'limbo-best' },
     'loop-serpent': { key: 'loop-serpent-best' },
+    'mortar-spotter': { key: 'mortar-spotter-best' },
     'neon-scrawl': { key: 'neonScrawlBest' },
     'orbit-drifter': { key: 'orbit-drifter-best' },
     'pacman': { key: 'pacman-best' },
@@ -707,7 +720,7 @@
     }
 
     // Update Dashboard UI
-    document.getElementById('stats-played').textContent = `${playedCount} / 16`;
+    document.getElementById('stats-played').textContent = `${playedCount} / 17`;
     document.getElementById('stats-total-score').textContent = totalScorePoints.toLocaleString();
     document.getElementById('stats-rank').textContent = rank;
   }

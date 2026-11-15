@@ -3,7 +3,7 @@
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Live%20Gallery-blueviolet?style=for-the-badge&logo=github)](https://luke-hands.github.io/pages/)
 [![Zero Build](https://img.shields.io/badge/Build-Zero%20Dependencies%20%2F%20Vanilla%20JS-brightgreen?style=for-the-badge)](https://github.com/luke-hands/pages)
 
-Welcome to **Luke Hands — Gallery**, a curated collection of 15 self-contained HTML5 browser games, physics simulations, and web toys. Each project is designed to run directly in the browser with zero build steps, framework dependencies, or installation required.
+Welcome to **Luke Hands — Gallery**, a curated collection of 17 self-contained HTML5 browser games, physics simulations, and web toys. Each project is designed to run directly in the browser with zero build steps, framework dependencies, or installation required.
 
 Visit the live gallery at **[luke-hands.github.io/pages/](https://luke-hands.github.io/pages/)**.
 
@@ -98,6 +98,16 @@ The root gallery (`index.html`) serves as an interactive glassmorphic arcade das
 * **Controls**: `Arrow Keys` / `WASD` / Touch Swipe or On-screen D-Pad to turn snake.
 * **Technologies**: HTML5 Canvas, Pre-allocated Ring Buffers, Polyline Loop Intersection Logic, Web Audio API.
 * **Storage**: `loop-serpent-best`
+
+---
+
+### 🎯 Mortar Spotter 3D
+* **Folder**: [`/mortar-spotter/`](./mortar-spotter/)
+* **Tags**: `Action`, `Physics`
+* **Description**: Combined-arms 3D artillery & recon RTS across procedurally sculpted terrain. Pilot your Viper-1 recon tank and Bravo-2 binocular spotter crew to carve back raycasted fog of war, use counter-battery radar fixes, disable hostile radar/SAM/fuel depots, and shell enemy batteries under crosswinds.
+* **Controls**: Click terrain in `3D Tactical Cam` to command units; `WASD` to drive Viper-1 tank; `Tab` to switch units (`ALPHA-1`, `VIPER-1`, `BRAVO-2`); `Space` to fire / lase / deploy recon; `1`/`2`/`3` for camera modes.
+* **Technologies**: Three.js r128, 3D Ballistics & Fog-of-War Raycasting, Web Audio API, Web Speech API, Optional Gemini API Integration (with full offline Simulated AI).
+* **Storage**: `mortar-spotter-best`
 
 ---
 

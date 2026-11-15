@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MORTAR SPOTTER 3D // Viper-1 Recon Tank &amp; Artillery</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- TOP COMMAND BAR (MERGED HEADER + MISSION GEN + CONFIG POPOVER) -->
+    <header class="top-bar">
+      <div class="brand-block">
+        <div class="brand-title-row">
+          <a href="../index.html" class="btn-ghost btn-compact back-to-gallery" title="Back to Arcade Gallery">← GALLERY</a>
+          <span class="status-dot" id="status-dot"></span>
+          <h1 id="op-title">OP: IRON RIDGE</h1>
+          <span class="mode-badge sim" id="ai-mode-badge">SIMULATED AI</span>
+          <button type="button" id="quick-reset-btn" class="btn-ghost btn-compact">NEW BATTLE</button>
+        </div>
+      </div>
+
+      <div class="mission-prompt-wrap">
+        <span class="prompt-tag">AI MISSION</span>
+        <input
+          type="text"
+          id="mission-prompt-input"
+          placeholder="e.g. Alpine snow pass at dusk with tall cliffs, strong crosswinds..."
+        />
+        <button type="button" id="generate-mission-btn" class="btn-secondary btn-compact">GENERATE</button>
+      </div>
+
+      <div class="top-right-controls">
+        <label class="toggle-pill" title="Speak Viper-1 spotter callouts using Web Speech API">
+          <input type="checkbox" id="tts-toggle" />
+          <span>RADIO TTS</span>
+        </label>
+        <label class="toggle-pill" title="Override 3D LOS Fog of War with Recon Satellite">
+          <input type="checkbox" id="recon-toggle" />
+          <span>RECON SAT</span>
+        </label>
+        <button type="button" id="toggle-config-btn" class="btn-ghost btn-compact" title="Open Gemini API Key, Model & Mission Briefing">
+          ⚙ AI &amp; BRIEFING
+        </button>
+      </div>
+
+      <div class="config-popover hidden" id="config-popover">
+        <div class="popover-header">
+          <span>MISSION BRIEFING &amp; GEMINI AI CONFIG</span>
+          <button type="button" id="close-config-btn" class="btn-icon" title="Close">✕</button>
+        </div>
+        <p class="op-briefing" id="op-briefing">
+          Combined-Arms RTS: Counter-Battery Radar locates hostile launches, SAM intercepts incoming fire if Radar survives, Fuel Depots keep tanks running, Sniper Belltowers guard approaches, and BRAVO-2 Binocular Recon spots across ridges, rivers, trees &amp; rail lines.
+        </p>
+        <div class="config-controls">
+          <div class="control-group">
+            <label for="api-key-input">GEMINI API KEY</label>
+            <div class="key-input-wrap">
+              <input type="password" id="api-key-input" placeholder="AIza... (optional, simulated if empty)" autocomplete="off" />
+              <button type="button" id="toggle-key-vis" class="btn-icon" title="Show/Hide Key">👁</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label for="model-select">MODEL</label>
+            <select id="model-select">
+              <option value="gemini-2.5-flash" selected>gemini-2.5-flash</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN 3D TACTICAL VIEWPORT -->
+    <main class="viewport-wrap">
+      <div id="viewport-3d"></div>
+      <div id="landmark-labels-layer"></div>
+
+      <!-- VIPER-1 TANK PERISCOPE / OPTICS OVERLAY (CAM 2) -->
+      <div id="bino-overlay" class="bino-overlay hidden">
+        <div class="bino-vignette"></div>
+        <svg class="bino-reticle" viewBox="0 0 400 240" preserveAspectRatio="xMidYMid meet">
+          <line x1="80" y1="120" x2="184" y2="120" stroke="rgba(74,222,128,0.75)" stroke-width="1" />
+          <line x1="216" y1="120" x2="320" y2="120" stroke="rgba(74,222,128,0.75)" stroke-width="1" />
+          <line x1="200" y1="35" x2="200" y2="106" stroke="rgba(74,222,128,0.75)" stroke-width="1" />
+          <line x1="200" y1="134" x2="200" y2="205" stroke="rgba(74,222,128,0.75)" stroke-width="1" />
+          <circle cx="200" cy="120" r="14" fill="none" stroke="rgba(74,222,128,0.65)" stroke-width="1" />
+          <circle cx="160" cy="120" r="1.5" fill="#4ade80" />
+          <circle cx="120" cy="120" r="1.5" fill="#4ade80" />
+          <circle cx="240" cy="120" r="1.5" fill="#4ade80" />
+          <circle cx="280" cy="120" r="1.5" fill="#4ade80" />
+          <circle cx="200" cy="80" r="1.5" fill="#4ade80" />
+          <circle cx="200" cy="160" r="1.5" fill="#4ade80" />
+        </svg>
+        <div class="bino-readout" id="bino-readout">OPTICS STATUS: CHECKING LINE OF SIGHT...</div>
+      </div>
+
+      <!-- TOP HUD OVERLAY -->
+      <div class="hud-top-overlay">
+        <div class="hud-card dual-friendly-card">
+          <div class="unit-status-row active" id="hud-unit-mortar">
+            <div class="unit-row-head">
+              <span class="hud-label">ALPHA-1 (MORTAR)</span>
+              <span class="hp-meta" id="player-hp-text">100 HP · E:-385 N:0</span>
+            </div>
+            <div class="hp-bar-wrap">
+              <div class="hp-bar player-hp-fill" id="player-hp-bar" style="width: 100%"></div>
+            </div>
+          </div>
+
+          <div class="unit-status-row" id="hud-unit-tank">
+            <div class="unit-row-head">
+              <span class="hud-label">VIPER-1 (RECON TANK)</span>
+              <span class="hp-meta" id="tank-hp-text">120 HP · E:-340 N:70</span>
+            </div>
+            <div class="hp-bar-wrap">
+              <div class="hp-bar tank-hp-fill" id="tank-hp-bar" style="width: 100%"></div>
+            </div>
+            <div class="fuel-row">
+              <span>FUEL</span>
+              <div class="fuel-bar-wrap">
+                <div class="fuel-bar-fill" id="tank-fuel-bar" style="width: 100%"></div>
+              </div>
+              <span id="tank-fuel-text">100% · REFUEL OK</span>
+            </div>
+          </div>
+
+          <div class="unit-status-row" id="hud-unit-recon">
+            <div class="unit-row-head">
+              <span class="hud-label">BRAVO-2 (BINO CREW)</span>
+              <span class="hp-meta" id="recon-hp-text">60 HP · E:-295 N:35</span>
+            </div>
+            <div class="hp-bar-wrap">
+              <div class="hp-bar recon-hp-fill" id="recon-status-bar" style="width: 100%"></div>
+            </div>
+            <div class="fuel-row recon-meta-row">
+              <span>BINO</span>
+              <span id="recon-status-text">HOLDING · OPTICS READY</span>
+            </div>
+          </div>
+
+          <div class="amenities-meta-row" id="friendly-amenities-text">
+            RADAR: OK · SAM: ARMED · FUEL: OK · SNIPER: OK
+          </div>
+        </div>
+
+        <div class="hud-center-cluster">
+          <div class="wind-gauge" id="hud-wind">
+            <span class="wind-label">3D WIND</span>
+            <span class="wind-arrow" id="wind-arrow">→</span>
+            <span class="wind-val" id="wind-val">+0.0 m/s</span>
+          </div>
+          <div class="turn-banner" id="turn-banner">RTS ACTIVE — CLICK TERRAIN TO MOVE · SPACE TO FIRE</div>
+        </div>
+
+        <div class="hud-card enemy-card">
+          <div class="hud-label" id="enemy-name-label">HOSTILE CONTACT (UNSPOTTED IN SHROUD)</div>
+          <div class="hp-bar-wrap">
+            <div class="hp-bar enemy-hp-fill" id="enemy-hp-bar" style="width: 0%"></div>
+          </div>
+          <div class="hp-meta"><span id="enemy-hp-text">HP: ??? / ???</span> · <span id="enemy-pos-text">LOC: UNEXPLORED — USE RADAR OR RECON</span></div>
+          <div class="amenities-meta-row enemy-amenities" id="enemy-amenities-text">
+            ENEMY FORCES: UNSPOTTED IN SHROUD
+          </div>
+        </div>
+      </div>
+
+      <!-- CAMERA SWITCHER BAR -->
+      <div class="camera-bar">
+        <div class="cam-buttons">
+          <button type="button" class="cam-btn" data-cam="pit">1: GUNNER CAM</button>
+          <button type="button" class="cam-btn" data-cam="bino">2: VIPER-1 OPTICS</button>
+          <button type="button" class="cam-btn active" data-cam="orbit">3: RTS TACTICAL CAM</button>
+        </div>
+        <label class="toggle-pill cam-pill" title="Follow projectiles in flight until ridge crest/fog">
+          <input type="checkbox" id="shellcam-toggle" />
+          <span>AUTO SHELL-CAM</span>
+        </label>
+        <button type="button" id="toggle-rangefinder-btn" class="btn-mini">RANGE TABLE</button>
+      </div>
+
+      <aside class="rangefinder-popover hidden" id="rangefinder-popover">
+        <div class="popover-header">
+          <span>NO-WIND BALLISTIC RANGE TABLE (FLAT GROUND)</span>
+          <button type="button" id="close-rangefinder-btn" class="btn-icon">✕</button>
+        </div>
+        <table class="range-table">
+          <thead>
+            <tr>
+              <th>PWR \ ELEV</th>
+              <th>30°</th>
+              <th>45°</th>
+              <th>60°</th>
+              <th>75°</th>
+            </tr>
+          </thead>
+          <tbody id="rangefinder-tbody"></tbody>
+        </table>
+        <p class="range-note">ALPHA-1 Mortar uses 2.55x velocity (35°–85°). VIPER-1 Recon Tank fires 105mm howitzer at 2.95x velocity (~34% longer range, 10°–65°) and spots impacts via 3D raycasted LOS.</p>
+      </aside>
+    </main>
+
+    <!-- BOTTOM CONTROL DECK -->
+    <section class="control-deck">
+      <!-- PANEL 1: UNIT, SPOTTER & FIRE CONTROL (2-COLUMN INTERNAL LAYOUT) -->
+      <div class="deck-panel fire-control-panel">
+        <div class="panel-header">
+          <h2>FIRE &amp; SPOTTER CONTROL</h2>
+          <span class="hotkey-hint">CLICK MAP: MOVE · R: RADAR · T: TANK-&gt;COORDS · G: RECON · TAB: UNIT</span>
+        </div>
+
+        <div class="fire-control-body">
+          <!-- LEFT SUB-COLUMN: GUNNERY -->
+          <div class="gunnery-col">
+            <div class="unit-selector-bar">
+              <button type="button" class="unit-btn active" id="select-mortar-btn" data-unit="mortar">
+                <strong>ALPHA-1 MORTAR</strong>
+                <small>81mm · Flare/Cluster</small>
+              </button>
+              <button type="button" class="unit-btn" id="select-tank-btn" data-unit="tank">
+                <strong>VIPER-1 TANK</strong>
+                <small>105mm · Spotter</small>
+              </button>
+              <button type="button" class="unit-btn" id="select-recon-btn" data-unit="recon">
+                <strong>BRAVO-2 CREW</strong>
+                <small>Binos · Recon</small>
+              </button>
+            </div>
+
+            <div class="sliders-grid">
+              <div class="slider-row">
+                <label for="azim-slider">AZIM (-L / +R)</label>
+                <input type="range" id="azim-slider" min="-45" max="45" step="0.1" value="0" />
+                <div class="num-unit">
+                  <input type="number" id="azim-input" min="-45" max="45" step="0.1" value="0" />
+                  <span>°</span>
+                </div>
+              </div>
+
+              <div class="slider-row">
+                <label for="angle-slider">ELEV <span id="elev-range-label">(35°–85°)</span></label>
+                <input type="range" id="angle-slider" min="35" max="85" step="0.1" value="54" />
+                <div class="num-unit">
+                  <input type="number" id="angle-input" min="35" max="85" step="0.1" value="54" />
+                  <span>°</span>
+                </div>
+              </div>
+
+              <div class="slider-row">
+                <label for="power-slider">CHARGE</label>
+                <input type="range" id="power-slider" min="10" max="100" step="0.1" value="72" />
+                <div class="num-unit">
+                  <input type="number" id="power-input" min="10" max="100" step="0.1" value="72" />
+                  <span>%</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="shell-selector-block">
+              <div class="shell-grid" id="shell-selector">
+                <button type="button" class="shell-btn active" data-shell="HE">
+                  <strong>HE</strong>
+                  <small>High Ex</small>
+                </button>
+                <button type="button" class="shell-btn" data-shell="SMOKE">
+                  <strong>SMOKE</strong>
+                  <small>Mark</small>
+                </button>
+                <button type="button" class="shell-btn" data-shell="FLARE">
+                  <strong>FLARE</strong>
+                  <small>Light</small>
+                </button>
+                <button type="button" class="shell-btn" data-shell="CLUSTER">
+                  <strong>CLUSTER</strong>
+                  <small>5x</small>
+                </button>
+              </div>
+            </div>
+
+            <div class="action-buttons-row">
+              <button type="button" id="laser-spot-btn" class="btn-laser" title="Fire VIPER-1 tank laser rangefinder or BRAVO-2 binoculars">
+                LASER SPOTTER
+              </button>
+              <button type="button" id="fire-btn" class="btn-fire">
+                FIRE MORTAR (SPACE)
+              </button>
+            </div>
+          </div>
+
+          <!-- RIGHT SUB-COLUMN: TACTICAL RECON & CALLED-IN COORDS -->
+          <div class="tactical-col">
+            <div class="recon-command-row">
+              <button type="button" id="radar-sweep-btn" class="btn-radar" title="Use SENTINEL-R1 Counter-Battery Radar to triangulate launch origin">
+                RADAR SWEEP (R)
+              </button>
+              <button type="button" id="send-tank-coords-btn" class="btn-tank-coords" title="Order VIPER-1 Tank to drive to the Radar-triangulated or currently selected called-in coordinates (Hotkey: T)">
+                TANK-&gt;COORDS (T)
+              </button>
+              <button type="button" id="advance-recon-btn" class="btn-recon" title="Order BRAVO-2 ground crew with binoculars to advance and recon">
+                ADV. RECON (G)
+              </button>
+              <select id="target-priority-select" title="Select which spotted or radar-tracked target to compute direct-hit specs for">
+                <option value="mortar">TGT: HOSTILE MORTAR</option>
+                <option value="radar_est">TGT: RADAR ESTIMATE (UNTRIANGULATED)</option>
+                <option value="tank">TGT: ENEMY TANK</option>
+                <option value="scout">TGT: ENEMY SCOUT</option>
+                <option value="radar">TGT: EAST RADAR (DISABLES SAM)</option>
+                <option value="sam">TGT: EAST SAM BATTERY</option>
+                <option value="depot">TGT: EAST FUEL DEPOT</option>
+                <option value="tower">TGT: EAST SNIPER TOWER</option>
+                <option value="train">TGT: SUPPLY TRAIN</option>
+              </select>
+            </div>
+
+            <div class="called-coords-tray" id="called-coords-tray">
+              <div class="called-coords-header">
+                <span class="field-caption">CALLED COORDS (AIM / ➔ TNK)</span>
+                <span class="called-coords-active-label" id="called-coords-active-label">NO COORDS LOCKED</span>
+              </div>
+              <div class="called-coords-list" id="called-coords-list">
+                <span class="coords-empty-hint">No coords called in yet — run RADAR SWEEP (R) or ADVANCE RECON (G)</span>
+              </div>
+            </div>
+
+            <div class="drive-pad-panel disabled" id="drive-pad-panel">
+              <div class="drive-title">DRIVE</div>
+              <div class="drive-dpad">
+                <button type="button" class="drive-btn" id="drive-left" title="Steer Left (A)">◄ L</button>
+                <button type="button" class="drive-btn" id="drive-fwd" title="Drive Forward (W)">▲ FWD</button>
+                <button type="button" class="drive-btn" id="drive-rev" title="Reverse (S)">▼ REV</button>
+                <button type="button" class="drive-btn" id="drive-right" title="Steer Right (D)">► R</button>
+              </div>
+              <div class="drive-fuel-note" id="drive-status-note">Select VIPER-1 to drive</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL 2: VIPER-1 TANK SPOTTER RADIO LOG -->
+      <div class="deck-panel spotter-panel">
+        <div class="panel-header">
+          <h2>VIPER-1 TANK SPOTTER RADIO LOG</h2>
+          <span class="badge-live" id="spotter-badge">RECON TANK LOS</span>
+        </div>
+        <div class="radio-log" id="spotter-log"></div>
+      </div>
+
+      <!-- PANEL 3: ENEMY AI REASONING & SHOT TELEMETRY -->
+      <div class="deck-panel telemetry-panel">
+        <div class="panel-header">
+          <h2>ENEMY AI REASONING &amp; TELEMETRY</h2>
+          <span class="badge-enemy" id="enemy-ai-badge">SIGINT INTERCEPT</span>
+        </div>
+
+        <div class="intercept-box">
+          <div class="intercept-label">INTERCEPTED BALLISTIC REASONING</div>
+          <div class="intercept-text" id="enemy-reasoning">
+            Awaiting hostile fire mission...
+          </div>
+          <div class="intercept-taunt" id="enemy-taunt"></div>
+        </div>
+
+        <div class="telemetry-table-wrap">
+          <table class="telemetry-table">
+            <thead>
+              <tr>
+                <th>Shot #</th>
+                <th>Azim</th>
+                <th>Elev</th>
+                <th>Pwr</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody id="shot-history-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="gemini.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
